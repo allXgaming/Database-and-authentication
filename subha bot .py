@@ -1,10 +1,11 @@
-from authentication import is_authorized
 import time
 import sqlite3
 import threading
 import math
 from collections import deque, Counter
 import requests
+import os
+from authentication import is_authorized  # <-- authentication যোগ
 
 # ============ ডাটাবেস ============
 def init_db():
@@ -45,6 +46,7 @@ def load_recent_history(limit=300):
 init_db()
 
 API_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json?ts={}"
+# টোকেন নিরাপদ রাখতে এনভায়রনমেন্ট ভেরিয়েবল ব্যবহার করো
 BOT_TOKEN = "7768747736:AAHRFAiemrbWwo2aCY0geWyBBY385gPJcZ8"
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}/"
 
@@ -513,6 +515,13 @@ def main():
                 if msg:
                     chat_id = msg["chat"]["id"]
                     if msg.get("text") == "/start":
+                        user = msg["from"]["username"]
+                        if not is_authorized(user):   # <-- অথরাইজেশন চেক
+                            requests.post(TELEGRAM_API + "sendMessage", json={
+                                "chat_id": chat_id,
+                                "text": "⛔ আপনি অনুমোদিত নন।"
+                            }, timeout=10)
+                            continue
                         keyboard = {
                             "inline_keyboard": [
                                 [{"text": "▶️ START", "callback_data": "start"}],
@@ -536,6 +545,13 @@ def main():
                     requests.post(TELEGRAM_API + "answerCallbackQuery", json={"callback_query_id": cb_id}, timeout=5)
 
                     if data == "start":
+                        user = cb["from"]["username"]
+                        if not is_authorized(user):   # <-- অথরাইজেশন চেক
+                            requests.post(TELEGRAM_API + "sendMessage", json={
+                                "chat_id": chat_id,
+                                "text": "⛔ আপনি অনুমোদিত নন।"
+                            }, timeout=10)
+                            continue
                         if not predictor.running:
                             predictor.start(chat_id)
                         else:
