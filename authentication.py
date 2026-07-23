@@ -2,7 +2,7 @@
 
 # অনুমোদিত ইউজারনেমের তালিকা
 AUTHORIZED_USERNAMES = [
-    "your_username_1",   # এখানে নিজের ইউজারনেম বসাও
+    "Mrperfectguidesofficial",   # এখানে নিজের ইউজারনেম বসাও
     "your_username_2"
 ]
 
