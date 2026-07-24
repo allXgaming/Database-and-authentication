@@ -13,7 +13,7 @@ from collections import deque, Counter
 
 # ---------- কনফিগারেশন ----------
 API_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json?ts={}"
-BOT_TOKEN = "7768747736:AAHRFAiemrbWwo2aCY0geWyBBY385gPJcZ8"   # আপনার টোকেন দিন
+BOT_TOKEN = "7616902302:AAEp4VjUFX9mfBqYuc_ZY7pfuntVvQ8dpWE"   # আপনার টোকেন দিন
 TELEGRAM_API = "https://api.telegram.org/bot{}/".format(BOT_TOKEN)
 
 # ==================== অ্যাডমিন ও অথরাইজেশন ====================
