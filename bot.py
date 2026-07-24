@@ -1,4 +1,4 @@
-# ==================== সম্পূর্ণ কোড (শুধু অ্যাডমিনের জন্য ডেটা ভিউ) ====================
+# ==================== সম্পূর্ণ কোড (সঠিক চ্যাট আইডি + ডেটা ভিউ ঠিক করা) ====================
 import time
 import threading
 import math
@@ -17,11 +17,12 @@ BOT_TOKEN = "7616902302:AAEp4VjUFX9mfBqYuc_ZY7pfuntVvQ8dpWE"   # আপনার
 TELEGRAM_API = "https://api.telegram.org/bot{}/".format(BOT_TOKEN)
 
 # ==================== অ্যাডমিন ও অথরাইজেশন ====================
-ADMIN_USER_ID = 5824157133  # ← এখানে আপনার টেলিগ্রাম আইডি দিন (শুধু এই আইডি ডেটা দেখতে পারবে)
+ADMIN_USER_ID = 5824157133  # ← এখানে আপনার টেলিগ্রাম আইডি দিন
 
 AUTHORIZED_USER_IDS = {
-    5824157133,  # অ্যাডমিনও অথরাইজড
-    7237785856,  # অন্য অথরাইজড ইউজার (তারা ডেটা দেখতে পারবে না)
+    5824157133,
+    7237785856,
+
 }
 
 def is_authorized(user_id):
@@ -516,24 +517,28 @@ class Predictor:
             self.streak = 0
         self.total_predictions += 1
 
-    def send_message(self, text):
-        if self.chat_id:
+    def send_message(self, text, chat_id=None):
+        """যদি chat_id দেওয়া থাকে তাহলে সেটা ব্যবহার করবে, না হলে self.chat_id ব্যবহার করবে"""
+        target_chat = chat_id if chat_id is not None else self.chat_id
+        if target_chat:
             try:
                 url = TELEGRAM_API + "sendMessage"
-                payload = {"chat_id": self.chat_id, "text": text, "parse_mode": "Markdown"}
+                payload = {"chat_id": target_chat, "text": text, "parse_mode": "Markdown"}
                 http_post_json(url, payload, timeout=10)
             except:
                 pass
 
-    def send_document(self, filename, content):
-        if self.chat_id:
+    def send_document(self, filename, content, chat_id=None):
+        """যদি chat_id দেওয়া থাকে তাহলে সেটা ব্যবহার করবে, না হলে self.chat_id ব্যবহার করবে"""
+        target_chat = chat_id if chat_id is not None else self.chat_id
+        if target_chat:
             try:
                 url = TELEGRAM_API + "sendDocument"
                 boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
                 
                 body = "--{boundary}\r\n".format(boundary=boundary)
                 body += 'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
-                body += "{chat_id}\r\n".format(chat_id=self.chat_id)
+                body += "{chat_id}\r\n".format(chat_id=target_chat)
                 body += "--{boundary}\r\n".format(boundary=boundary)
                 body += 'Content-Disposition: form-data; name="document"; filename="{filename}"\r\n'.format(filename=filename)
                 body += "Content-Type: text/csv\r\n\r\n"
@@ -549,19 +554,20 @@ class Predictor:
                     return response.read()
             except Exception as e:
                 print("Send document error:", e)
-                self.send_message("❌ ফাইল পাঠাতে সমস্যা হয়েছে।")
+                self.send_message("❌ ফাইল পাঠাতে সমস্যা হয়েছে।", chat_id=target_chat)
 
     def start(self, chat_id):
         if self.running:
+            self.send_message("⏳ ইতিমধ্যে চলছে...", chat_id=chat_id)
             return
         self.running = True
-        self.chat_id = chat_id
-        self.send_message("✅ প্রেডিকশন শুরু! (শুধু LEVEL 1-2: ≥85%)")
+        self.chat_id = chat_id  # ব্যাকগ্রাউন্ড লুপের জন্য সেট রাখা
+        self.send_message("✅ প্রেডিকশন শুরু! (শুধু LEVEL 1-2: ≥85%)", chat_id=chat_id)
         threading.Thread(target=self._loop, daemon=True).start()
 
-    def stop(self):
+    def stop(self, chat_id=None):
         self.running = False
-        self.send_message("⏹ বন্ধ করা হয়েছে।")
+        self.send_message("⏹ বন্ধ করা হয়েছে।", chat_id=chat_id)
 
     def _loop(self):
         seen = set()
@@ -601,6 +607,7 @@ class Predictor:
                             "size": pred_data["size"],
                             "range": pred_data["range"]
                         }
+                        # লুপ থেকে পাঠানোর সময় self.chat_id ব্যবহার করবে
                         self.send_message(format_prediction_ui(pred_data, next_period))
                         predictions_sent.add(next_period)
 
@@ -645,7 +652,7 @@ def get_updates(offset=None):
 
 def main():
     global last_update_id
-    print("🤖 বট চালু হচ্ছে... (শুধু অ্যাডমিনের জন্য ডেটা ভিউ)")
+    print("🤖 বট চালু হচ্ছে... (সঠিক চ্যাট আইডি + ডেটা ভিউ ঠিক করা)")
     print("📊 LEVEL 1 (≥92%) | LEVEL 2 (≥85%)")
     print("📁 ডেটা সংরক্ষণ: predictions.db (SQLite)")
     print("🔐 অথেন্টিকেশন সক্রিয় (শুধু অনুমোদিত ইউজার)")
@@ -663,6 +670,9 @@ def main():
                     user_id = msg["from"]["id"]
                     text = msg.get("text", "")
 
+                    # ডিবাগ: কনসোলে ইউজার আইডি দেখানো
+                    print("📱 ইউজার:", user_id, "চ্যাট:", chat_id, "টেক্সট:", text)
+
                     # অথেন্টিকেশন চেক
                     if not is_authorized(user_id):
                         http_post_json(TELEGRAM_API + "sendMessage", {
@@ -672,7 +682,7 @@ def main():
                         }, timeout=10)
                         continue
 
-                    # /start কমান্ড (শুধুমাত্র অ্যাডমিনের জন্য SHOW DATA বাটন)
+                    # /start কমান্ড
                     if text == "/start":
                         keyboard = {
                             "inline_keyboard": [
@@ -687,8 +697,10 @@ def main():
                         
                         keyboard["inline_keyboard"].append([{"text": "📞 CONTACT", "url": "https://t.me/your_username"}])
                         
-                        start_text = "🤖 *SUBHA v3.0 (Admin Data View)*\n\n✅ প্রতি পিরিয়ডে প্রেডিকশন\n✅ LEVEL 1 (≥92%) | LEVEL 2 (≥85%)\n✅ ডেটা SQLite-তে সেভ হয়\n"
+                        start_text = "🤖 *SUBHA v3.0 (সঠিক চ্যাট আইডি)*\n\n✅ প্রতি পিরিয়ডে প্রেডিকশন\n✅ LEVEL 1 (≥92%) | LEVEL 2 (≥85%)\n✅ ডেটা SQLite-তে সেভ হয়\n"
+                        start_text += "👤 আপনার আইডি: `{}`\n".format(user_id)
                         if is_admin(user_id):
+                            start_text += "✅ আপনি অ্যাডমিন, ডেটা দেখতে পারবেন।\n"
                             start_text += "✅ /show_data - ডেটা দেখুন\n✅ /download_data - CSV ডাউনলোড\n"
                         else:
                             start_text += "⛔ ডেটা ভিউ শুধুমাত্র অ্যাডমিনের জন্য\n"
@@ -730,8 +742,7 @@ def main():
                             continue
                         csv_data = generate_csv()
                         if csv_data:
-                            predictor.chat_id = chat_id
-                            predictor.send_document("predictions_data.csv", csv_data)
+                            predictor.send_document("predictions_data.csv", csv_data, chat_id=chat_id)
                         else:
                             http_post_json(TELEGRAM_API + "sendMessage", {
                                 "chat_id": chat_id,
@@ -746,6 +757,8 @@ def main():
                     cb_id = cb["id"]
                     http_post_json(TELEGRAM_API + "answerCallbackQuery", {"callback_query_id": cb_id}, timeout=5)
 
+                    print("📱 কীবোর্ড ক্লিক - ইউজার:", user_id, "চ্যাট:", chat_id, "ডেটা:", data)
+
                     if not is_authorized(user_id):
                         http_post_json(TELEGRAM_API + "sendMessage", {
                             "chat_id": chat_id,
@@ -754,19 +767,15 @@ def main():
                         continue
 
                     if data == "start":
-                        if not predictor.running:
-                            predictor.start(chat_id)
-                        else:
-                            predictor.send_message("⏳ চলছে...")
+                        predictor.start(chat_id)  # chat_id পাস করছি
                     elif data == "stop":
-                        predictor.stop()
+                        predictor.stop(chat_id)  # chat_id পাস করছি
                     elif data == "status":
                         stats = "📊 *পরিসংখ্যান*\n✅ জয়: {wins}\n❌ হার: {losses}\n🔥 স্ট্রিক: {streak}\n🏆 সেরা: {best}\n📈 মোট: {total}".format(
                             wins=predictor.wins, losses=predictor.losses, streak=predictor.streak,
                             best=predictor.best_streak, total=predictor.total_predictions)
-                        predictor.send_message(stats)
+                        predictor.send_message(stats, chat_id=chat_id)  # chat_id পাস করছি
                     elif data == "show_data":
-                        # শুধুমাত্র অ্যাডমিন দেখতে পারবে
                         if not is_admin(user_id):
                             http_post_json(TELEGRAM_API + "sendMessage", {
                                 "chat_id": chat_id,
