@@ -21,6 +21,7 @@ TELEGRAM_API = "https://api.telegram.org/bot{}/".format(BOT_TOKEN)
 AUTHORIZED_USER_IDS = {
     5824157133,  # Replace with your Telegram IDs
     7237785856,
+    7747517074,
 }
 
 # Admin users who can view data
