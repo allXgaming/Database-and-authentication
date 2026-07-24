@@ -4,6 +4,7 @@ import time
 import threading
 import math
 from collections import deque, Counter
+from typing import Optional, Dict, Any, List
 
 import requests
 
@@ -16,22 +17,19 @@ from auth import (
 )
 
 # ==================== কনফিগ ====================
-BOT_TOKEN = "8803777907:AAFPud19O5QDy0JtOeyGl_L_-smG86ZYQyM"   # ← আপনার টোকেন দিন
+BOT_TOKEN = "7768747736:AAHRFAiemrbWwo2aCY0geWyBBY385gPJcZ8"   # ← আপনার টোকেন দিন
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}/"
 API_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json?ts={}"
-SUPER_ADMIN_ID = 5824157133  # ← আপনার টেলিগ্রাম আইডি (সুপার অ্যাডমিন)
+SUPER_ADMIN_ID = 5824157133   # ← আপনার টেলিগ্রাম আইডি দিন
 
 # ==================== ডেটাবেস ইনিশিয়ালাইজ ====================
 db = GameDataManager("predictions.db")
-
-# অথোরাইজড ইউজার তালিকা ডেটাবেস থেকে সিঙ্ক
 AUTHORIZED_USER_IDS.update(db.get_authorized_users())
-# সুপার অ্যাডমিন সবসময় থাকবে
 AUTHORIZED_USER_IDS.add(SUPER_ADMIN_ID)
 
 
 # ==================== UI ফরম্যাট ====================
-def format_prediction_ui(pred_data: dict, period: str) -> str:
+def format_prediction_ui(pred_data: Dict[str, Any], period: str) -> str:
     size = pred_data["size"]
     conf = pred_data["confidence"]
     num_range = pred_data["range"]
@@ -90,8 +88,14 @@ def format_prediction_ui(pred_data: dict, period: str) -> str:
 """
 
 
-def format_result_ui(period: str, number: int, actual_size: str,
-                     result: str, pred: str, range_pred: str) -> str:
+def format_result_ui(
+    period: str,
+    number: int,
+    actual_size: str,
+    result: str,
+    pred: str,
+    range_pred: str,
+) -> str:
     if result == "WIN":
         status_emoji, status_text, bg = "✅", "WIN 🎉", "🟢"
     else:
@@ -113,14 +117,14 @@ def format_result_ui(period: str, number: int, actual_size: str,
 # ==================== প্রেডিক্টর ====================
 class Predictor:
     def __init__(self):
-        self.history = deque(maxlen=300)
+        self.history: deque = deque(maxlen=300)
         self.wins = 0
         self.losses = 0
         self.streak = 0
         self.best_streak = 0
         self.total_predictions = 0
         self.running = False
-        self.chat_id = None
+        self.chat_id: Optional[int] = None
         self._load_from_db()
 
     def _load_from_db(self):
@@ -130,13 +134,19 @@ class Predictor:
             if num is not None:
                 self.history.append(num)
 
-    def update(self, num: int, period: str, prediction: str = None,
-               result: str = None, range_pred: str = None):
+    def update(
+        self,
+        num: int,
+        period: str,
+        prediction: Optional[str] = None,
+        result: Optional[str] = None,
+        range_pred: Optional[str] = None,
+    ):
         size = "BIG" if num >= 5 else "SMALL"
         self.history.append(num)
         db.save_round(period, num, size, prediction, result, range_pred)
 
-    def fetch_data(self):
+    def fetch_data(self) -> List[Dict[str, Any]]:
         try:
             ts = int(time.time() * 1000)
             r = requests.get(API_URL.format(ts), timeout=10)
@@ -147,12 +157,14 @@ class Predictor:
         return []
 
     # ---------- ইন্ডিকেটর ----------
-    def ma(self, data, w):
-        return sum(data[-w:]) / w if len(data) >= w else sum(data) / len(data) if data else 0
+    def ma(self, data: List[int], w: int) -> float:
+        if len(data) >= w:
+            return sum(data[-w:]) / w
+        return sum(data) / len(data) if data else 0
 
-    def rsi(self, data, w=14):
+    def rsi(self, data: List[int], w: int = 14) -> float:
         if len(data) < w + 1:
-            return 50
+            return 50.0
         gain, loss = 0, 0
         for i in range(1, w + 1):
             d = data[-i] - data[-i - 1]
@@ -160,11 +172,13 @@ class Predictor:
                 gain += d
             else:
                 loss += abs(d)
-        return 100 - (100 / (1 + (gain / loss))) if loss != 0 else 100
+        if loss == 0:
+            return 100.0
+        return 100.0 - (100.0 / (1 + (gain / loss)))
 
-    def std_dev(self, data, w=20):
+    def std_dev(self, data: List[int], w: int = 20) -> float:
         if len(data) < w:
-            return 0
+            return 0.0
         recent = data[-w:]
         mean = sum(recent) / w
         return math.sqrt(sum((x - mean) ** 2 for x in recent) / w)
@@ -173,7 +187,7 @@ class Predictor:
     def predict_size(self):
         hist = list(self.history)
         if len(hist) < 20:
-            return "BIG", 60, "5 • 9", "BULLISH", 50, "LOW", "NEUTRAL", "STABLE", 50, 50
+            return "BIG", 60, "5 • 9", "BULLISH", 50.0, "LOW", "NEUTRAL", "STABLE", 50, 50
 
         last = hist[-1]
         last_size = "BIG" if last >= 5 else "SMALL"
@@ -201,10 +215,10 @@ class Predictor:
             conf = 85
         else:
             # অল্টারনেটিং প্যাটার্ন চেক
-            def is_alt(l):
-                if len(hist) < l:
+            def is_alt(length: int) -> bool:
+                if len(hist) < length:
                     return False
-                for i in range(1, l):
+                for i in range(1, length):
                     if (hist[-i] >= 5) == (hist[-i - 1] >= 5):
                         return False
                 return True
@@ -262,11 +276,9 @@ class Predictor:
                     conf = 70
 
         # ------------------ মেট্রিক্স ------------------
-        # স্ট্যান্ডার্ড ডেভিয়েশন
         std = self.std_dev(hist, 20)
         std_text = "LOW" if std < 1.5 else "MEDIUM" if std < 2.5 else "HIGH"
 
-        # MA টেক্সট
         ma5 = self.ma(hist, 5)
         ma10 = self.ma(hist, 10)
         ma20 = self.ma(hist, 20)
@@ -310,7 +322,7 @@ class Predictor:
             small_pct,
         )
 
-    def _is_alt(self, hist, length):
+    def _is_alt(self, hist: List[int], length: int) -> bool:
         if len(hist) < length:
             return False
         for i in range(1, length):
@@ -318,7 +330,7 @@ class Predictor:
                 return False
         return True
 
-    def get_next_prediction(self):
+    def get_next_prediction(self) -> Dict[str, Any]:
         (
             size,
             conf,
@@ -380,8 +392,7 @@ class Predictor:
     # ---------- লুপ ----------
     def _loop(self):
         seen = set()
-        predictions_sent = set()
-        current_prediction = None
+        current_prediction: Optional[Dict[str, Any]] = None
 
         while self.running:
             try:
@@ -418,7 +429,6 @@ class Predictor:
                             "range": pred_data["range"],
                         }
                         self.send_message(format_prediction_ui(pred_data, next_period))
-                        predictions_sent.add(next_period)
 
                 # রেজাল্ট চেক
                 if (
@@ -460,10 +470,10 @@ predictor = Predictor()
 last_update_id = 0
 
 
-def get_updates(offset=None):
+def get_updates(offset: Optional[int] = None) -> List[Dict[str, Any]]:
     url = TELEGRAM_API + "getUpdates"
     params = {"timeout": 30}
-    if offset:
+    if offset is not None:
         params["offset"] = offset
     try:
         r = requests.get(url, params=params, timeout=35)
@@ -476,7 +486,7 @@ def get_updates(offset=None):
 
 def main():
     global last_update_id
-    print("🤖 বট চালু হচ্ছে... (Integrated v2.0)")
+    print("🤖 বট চালু হচ্ছে... (Integrated v2.1 - Python 3.8+ compatible)")
     print("📊 শুধুমাত্র অনুমোদিত ব্যবহারকারীরা ব্যবহার করতে পারবেন।")
 
     while True:
@@ -518,7 +528,7 @@ def main():
                             TELEGRAM_API + "sendMessage",
                             json={
                                 "chat_id": chat_id,
-                                "text": "🤖 *SUBHA v2.0 (Integrated)*\n\n✅ প্রতি পিরিয়ডে প্রেডিকশন\n✅ LEVEL 1 (≥92%) | LEVEL 2 (≥85%)\n✅ নতুন UI + অথোরাইজেশন\n✅ ডেটাবেস সংযুক্ত\n\nনিচের বোতাম চাপুন।",
+                                "text": "🤖 *SUBHA v2.1 (Integrated)*\n\n✅ প্রতি পিরিয়ডে প্রেডিকশন\n✅ LEVEL 1 (≥92%) | LEVEL 2 (≥85%)\n✅ নতুন UI + অথোরাইজেশন\n✅ ডেটাবেস সংযুক্ত\n\nনিচের বোতাম চাপুন।",
                                 "reply_markup": keyboard,
                                 "parse_mode": "Markdown",
                             },
@@ -527,7 +537,6 @@ def main():
                         continue
 
                     if text.startswith("/adduser"):
-                        # শুধুমাত্র সুপার অ্যাডমিন
                         if chat_id != SUPER_ADMIN_ID:
                             predictor.send_message("⛔ এই কমান্ড শুধুমাত্র সুপার অ্যাডমিনের জন্য।")
                             continue
@@ -539,8 +548,9 @@ def main():
                         db.add_authorized_user(new_id)
                         add_authorized_user(new_id)
                         predictor.send_message(f"✅ ইউজার {new_id} যোগ করা হয়েছে।")
+                        continue
 
-                    elif text.startswith("/removeuser"):
+                    if text.startswith("/removeuser"):
                         if chat_id != SUPER_ADMIN_ID:
                             predictor.send_message("⛔ এই কমান্ড শুধুমাত্র সুপার অ্যাডমিনের জন্য।")
                             continue
@@ -555,8 +565,9 @@ def main():
                         db.remove_authorized_user(rem_id)
                         remove_authorized_user(rem_id)
                         predictor.send_message(f"✅ ইউজার {rem_id} সরানো হয়েছে।")
+                        continue
 
-                    elif text == "/users":
+                    if text == "/users":
                         if chat_id != SUPER_ADMIN_ID:
                             predictor.send_message("⛔ এই কমান্ড শুধুমাত্র সুপার অ্যাডমিনের জন্য।")
                             continue
@@ -566,6 +577,7 @@ def main():
                         else:
                             txt = "📋 কোনো অনুমোদিত ব্যবহারকারী নেই।"
                         predictor.send_message(txt)
+                        continue
 
                 # ---------- কলব্যাক ----------
                 cb = update.get("callback_query")
@@ -574,7 +586,6 @@ def main():
                     data = cb["data"]
                     cb_id = cb["id"]
 
-                    # অথোরাইজেশন চেক (কলব্যাকের জন্যও)
                     if not is_authorized(chat_id):
                         requests.post(
                             TELEGRAM_API + "answerCallbackQuery",
@@ -607,7 +618,6 @@ def main():
                         )
                         predictor.send_message(stats)
                     elif data == "users":
-                        # শুধুমাত্র সুপার অ্যাডমিন
                         if chat_id != SUPER_ADMIN_ID:
                             predictor.send_message("⛔ এই অপশন শুধুমাত্র সুপার অ্যাডমিনের জন্য।")
                             continue

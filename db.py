@@ -1,7 +1,7 @@
 # db.py
 
 import sqlite3
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 
 try:
     import pandas as pd
@@ -11,7 +11,7 @@ except ImportError:
 
 
 class UniversalDataManager:
-    """সাধারণ SQLite ডেটা ম্যানেজার (ইনসার্ট, আপডেট, ডিলিট, কোয়েরি)"""
+    """সাধারণ SQLite ডেটা ম্যানেজার"""
 
     def __init__(
         self,
@@ -94,9 +94,14 @@ class UniversalDataManager:
             row = conn.execute(f"SELECT * FROM {self.table_name} WHERE {column}=?", (value,)).fetchone()
             return dict(row) if row else None
 
-    def get_many(self, column: Optional[str] = None, value: Any = None,
-                 limit: Optional[int] = None, order_by: Optional[str] = None,
-                 descending: bool = False) -> List[Dict[str, Any]]:
+    def get_many(
+        self,
+        column: Optional[str] = None,
+        value: Any = None,
+        limit: Optional[int] = None,
+        order_by: Optional[str] = None,
+        descending: bool = False,
+    ) -> List[Dict[str, Any]]:
         q = f"SELECT * FROM {self.table_name}"
         params = []
         if column is not None:
@@ -144,14 +149,12 @@ class UniversalDataManager:
             return conn.execute(f"SELECT COUNT(*) FROM {self.table_name}").fetchone()[0]
 
     def execute_query(self, query: str, params: tuple = ()) -> List[Dict[str, Any]]:
-        """কাস্টম SELECT কোয়েরি চালানোর জন্য"""
         with self.connect() as conn:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
 
     def execute_write(self, query: str, params: tuple = ()) -> bool:
-        """INSERT/UPDATE/DELETE এর জন্য"""
         try:
             with self.connect() as conn:
                 conn.execute(query, params)
@@ -161,7 +164,7 @@ class UniversalDataManager:
             print(f"Write Error: {e}")
             return False
 
-    # Excel/CSV import (প্যান্ডাস থাকলে)
+    # Excel/CSV import
     def import_excel(self, file_path: str, sheet_name: Optional[str] = 0) -> int:
         if not PANDAS_AVAILABLE:
             print("pandas ইনস্টল নেই")
@@ -212,9 +215,15 @@ class GameDataManager(UniversalDataManager):
             )
             conn.commit()
 
-    # ---------- rounds ----------
-    def save_round(self, period: str, number: int, size: str,
-                   prediction: str, result: str, range_pred: str) -> bool:
+    def save_round(
+        self,
+        period: str,
+        number: int,
+        size: str,
+        prediction: str,
+        result: str,
+        range_pred: str,
+    ) -> bool:
         return self.upsert(
             {
                 "period": str(period),
@@ -228,11 +237,10 @@ class GameDataManager(UniversalDataManager):
         )
 
     def get_recent_history(self, limit: int = 300) -> List[Dict[str, Any]]:
-        rows = self.execute_query(
+        return self.execute_query(
             f"SELECT * FROM {self.table_name} ORDER BY period DESC LIMIT ?",
             (limit,),
         )
-        return rows
 
     def get_last_round(self) -> Optional[Dict[str, Any]]:
         rows = self.execute_query(
@@ -240,7 +248,6 @@ class GameDataManager(UniversalDataManager):
         )
         return rows[0] if rows else None
 
-    # ---------- authorized_users ----------
     def add_authorized_user(self, user_id: int) -> bool:
         return self.execute_write(
             "INSERT OR IGNORE INTO authorized_users (user_id) VALUES (?)",
