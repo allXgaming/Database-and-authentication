@@ -1,4 +1,4 @@
-# ==================== সম্পূর্ণ বট (SQLite, ইমোজি বিহীন, বাংলা) ====================
+# ==================== Complete Bot (SQLite, English, No Emoji) ====================
 import time
 import threading
 import math
@@ -9,20 +9,20 @@ import urllib.error
 import urllib.parse
 from collections import deque, Counter
 
-# ---------- কনফিগারেশন ----------
+# ---------- Configuration ----------
 API_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json?ts={}"
-BOT_TOKEN = "7616902302:AAEp4VjUFX9mfBqYuc_ZY7pfuntVvQ8dpWE"   # আপনার টোকেন দিন
+BOT_TOKEN = "7616902302:AAEp4VjUFX9mfBqYuc_ZY7pfuntVvQ8dpWE"   # Your bot token
 TELEGRAM_API = "https://api.telegram.org/bot{}/".format(BOT_TOKEN)
 
-# ডাটাবেস ফাইল
+# Database file
 DB_FILE = "predictions.db"
 
-# ==================== অ্যাডমিন ও অথরাইজেশন ====================
-ADMIN_USER_ID = 5824157133  # ← এখানে আপনার টেলিগ্রাম আইডি দিন
+# ==================== Admin & Authorization ====================
+ADMIN_USER_ID = 5824157133  # Replace with your Telegram user ID
 
 AUTHORIZED_USER_IDS = {
-    7237785856,
     5824157133,
+    7237785856,
 }
 
 def is_authorized(user_id):
@@ -35,9 +35,9 @@ def is_admin(user_id):
         return False
     return user_id == ADMIN_USER_ID
 
-# ==================== ডাটাবেস (SQLite) ====================
+# ==================== Database (SQLite) ====================
 def init_db():
-    """ডাটাবেস ও টেবিল তৈরি করে"""
+    """Create database and table if not exists"""
     try:
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
@@ -51,10 +51,10 @@ def init_db():
                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
         conn.commit()
         conn.close()
-        print("ডাটাবেস তৈরি হয়েছে:", DB_FILE)
+        print("Database created:", DB_FILE)
         return True
     except Exception as e:
-        print("ডাটাবেস তৈরি করতে সমস্যা:", e)
+        print("Database error:", e)
         return False
 
 def save_round(period, number, size, prediction, result, range_pred):
@@ -68,7 +68,7 @@ def save_round(period, number, size, prediction, result, range_pred):
         conn.close()
         return True
     except Exception as e:
-        print("সেভ করতে সমস্যা:", e)
+        print("Save error:", e)
         return False
 
 def load_recent_history(limit=300):
@@ -81,7 +81,7 @@ def load_recent_history(limit=300):
         conn.close()
         return rows
     except Exception as e:
-        print("লোড করতে সমস্যা:", e)
+        print("Load error:", e)
         return []
 
 def get_total_count():
@@ -93,10 +93,10 @@ def get_total_count():
         conn.close()
         return count
     except Exception as e:
-        print("কাউন্ট করতে সমস্যা:", e)
+        print("Count error:", e)
         return 0
 
-# ==================== ইউটিলিটি ফাংশন ====================
+# ==================== Utility functions ====================
 def http_get_json(url, timeout=10):
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -104,7 +104,7 @@ def http_get_json(url, timeout=10):
             data = response.read().decode('utf-8')
             return json.loads(data)
     except Exception as e:
-        print("HTTP GET সমস্যা:", e)
+        print("HTTP GET error:", e)
         return None
 
 def http_post_json(url, payload, timeout=10):
@@ -114,125 +114,108 @@ def http_post_json(url, payload, timeout=10):
         with urllib.request.urlopen(req, timeout=timeout) as response:
             return response.read().decode('utf-8')
     except Exception as e:
-        print("HTTP POST সমস্যা:", e)
+        print("HTTP POST error:", e)
         return None
 
-# ==================== UI ফরম্যাটিং (বাংলা, ইমোজি বিহীন) ====================
+# ==================== UI Formatting (English, No Emoji) ====================
 def format_prediction_ui(pred_data, period):
     size = pred_data["size"]
     conf = pred_data["confidence"]
     num_range = pred_data["range"]
-    ma_val = pred_data.get("ma", "বুলিশ")
+    ma_val = pred_data.get("ma", "BULLISH")
     rsi_val = pred_data.get("rsi", 63.8)
-    std_val = pred_data.get("std", "নিম্ন")
-    pattern = pred_data.get("pattern", "একান্তর")
-    cycle = pred_data.get("cycle", "স্থিতিশীল")
+    std_val = pred_data.get("std", "LOW")
+    pattern = pred_data.get("pattern", "ALTERNATING")
+    cycle = pred_data.get("cycle", "STABLE")
     big_pct = pred_data.get("big_pct", 78)
     small_pct = pred_data.get("small_pct", 22)
     
-    # সংকেতের মাত্রা
     if conf >= 85:
-        signal = "উচ্চ সংকেত"
-        volatility = "নিম্ন"
-        risk = "নিম্ন"
+        signal = "HIGH"
+        volatility = "LOW"
+        risk = "LOW"
     else:
-        signal = "মাঝারি সংকেত"
-        volatility = "মাঝারি"
-        risk = "মাঝারি"
+        signal = "MEDIUM"
+        volatility = "MEDIUM"
+        risk = "MEDIUM"
     
-    size_text = "বড়" if size == "BIG" else "ছোট"
+    size_text = "BIG" if size == "BIG" else "SMALL"
     if conf >= 92:
-        level = "স্তর ১"
+        level = "LEVEL 1"
     elif conf >= 85:
-        level = "স্তর ২"
+        level = "LEVEL 2"
     else:
-        level = "স্তর ৩"
+        level = "LEVEL 3"
     
-    big_bar = "█" * int(big_pct / 10) + "░" * (10 - int(big_pct / 10))
-    small_bar = "█" * int(small_pct / 10) + "░" * (10 - int(small_pct / 10))
-    
-    # বাংলা অনুবাদ
-    ma_bn = {"বুলিশ": "বুলিশ", "বিয়ারিশ": "বিয়ারিশ", "নিরপেক্ষ": "নিরপেক্ষ",
-             "STRONG BULLISH": "শক্তিশালী বুলিশ", "BEARISH": "বিয়ারিশ",
-             "NEUTRAL": "নিরপেক্ষ", "BULLISH": "বুলিশ"}.get(ma_val, ma_val)
-    
-    pattern_bn = {"ALTERNATING": "একান্তর", "SPECIAL": "বিশেষ", "DRAGON": "ড্রাগন",
-                  "4-STREAK": "৪-ধারা", "3-STREAK BREAK": "৩-ধারা ভাঙন",
-                  "2-STREAK BREAK": "২-ধারা ভাঙন", "TRAP": "ফাঁদ", "RANDOM": "এলোমেলো",
-                  "ALTERNATING 8": "একান্তর ৮", "ALTERNATING 6": "একান্তর ৬"}.get(pattern, pattern)
-    
-    cycle_bn = {"STABLE": "স্থিতিশীল", "UNSTABLE": "অস্থিতিশীল"}.get(cycle, cycle)
-    std_bn = {"LOW": "নিম্ন", "MEDIUM": "মাঝারি", "HIGH": "উচ্চ"}.get(std_val, std_val)
+    big_bar = "#" * int(big_pct / 10) + "." * (10 - int(big_pct / 10))
+    small_bar = "#" * int(small_pct / 10) + "." * (10 - int(small_pct / 10))
     
     ui = """
-━━━━━━━━━━━━━━━━━━━━━━
-এআই বিশ্লেষণ
-━━━━━━━━━━━━━━━━━━━━━━
-গড় মূল্য (MA)      : {ma}
-আরএসআই (RSI)       : {rsi:.1f}
-মানক বিচ্যুতি (STD): {std}
-প্যাটার্ন           : {pattern}
-সাইকেল              : {cycle}
+================================
+AI ANALYSIS
+================================
+MA            : {ma}
+RSI           : {rsi:.1f}
+STD DEV       : {std}
+PATTERN       : {pattern}
+CYCLE         : {cycle}
 
-━━━━━━━━━━━━━━━━━━━━━━
-এআই ভোটিং
-━━━━━━━━━━━━━━━━━━━━━━
-বড়          {big_bar} {big_pct}%
-ছোট        {small_bar} {small_pct}%
+================================
+AI VOTING
+================================
+BIG          {big_bar} {big_pct}%
+SMALL        {small_bar} {small_pct}%
 
-চূড়ান্ত পূর্বাভাস : {size_text}
+FINAL PREDICTION : {size_text}
 
-━━━━━━━━━━━━━━━━━━━━━━
-এআই মেট্রিক্স
-━━━━━━━━━━━━━━━━━━━━━━
-আত্মবিশ্বাস    : {conf}%
-সংকেত          : {signal}
-অস্থিরতা       : {volatility}
-ঝুঁকি           : {risk}
+================================
+AI METRICS
+================================
+CONFIDENCE    : {conf}%
+SIGNAL        : {signal}
+VOLATILITY    : {volatility}
+RISK          : {risk}
 
-━━━━━━━━━━━━━━━━━━━━━━
-পর্যায়          : {period}
-পরিসর           : {num_range}
-স্তর             : {level}
-━━━━━━━━━━━━━━━━━━━━━━
-এআই অবস্থা : সক্রিয়
-ইঞ্জিন      : শুভ এআই
-মোড         : লাইভ
-━━━━━━━━━━━━━━━━━━━━━━
-""".format(ma=ma_bn, rsi=rsi_val, std=std_bn, pattern=pattern_bn, cycle=cycle_bn,
+================================
+PERIOD        : {period}
+RANGE         : {num_range}
+LEVEL         : {level}
+================================
+AI STATUS : ACTIVE
+ENGINE    : SUBHA AI
+MODE      : LIVE
+================================
+""".format(ma=ma_val, rsi=rsi_val, std=std_val, pattern=pattern, cycle=cycle,
            big_bar=big_bar, big_pct=big_pct, small_bar=small_bar, small_pct=small_pct,
            size_text=size_text, conf=conf, signal=signal, volatility=volatility,
            risk=risk, period=period, num_range=num_range, level=level)
     return ui
 
 def format_result_ui(period, number, actual_size, result, pred, range_pred):
-    if result == "WIN":
-        status_text = "জয়"
-    else:
-        status_text = "পরাজয়"
-    actual_text = "বড়" if actual_size == "BIG" else "ছোট"
+    status_text = "WIN" if result == "WIN" else "LOSS"
+    actual_text = "BIG" if actual_size == "BIG" else "SMALL"
     ui = """
 {status_text}
-━━━━━━━━━━━━━━━━━━━━━━
-ফলাফল
-━━━━━━━━━━━━━━━━━━━━━━
-পর্যায়    : {period}
-পূর্বাভাস : {pred}
-প্রকৃত     : {actual_text} [{number}]
-পরিসর      : {range_pred}
-━━━━━━━━━━━━━━━━━━━━━━
+================================
+RESULT
+================================
+PERIOD    : {period}
+PREDICT   : {pred}
+ACTUAL    : {actual_text} [{number}]
+RANGE     : {range_pred}
+================================
 """.format(status_text=status_text, period=period, pred=pred,
            actual_text=actual_text, number=number, range_pred=range_pred)
     return ui
 
 def format_data_first_last(first_two, last_two, total_count):
-    """প্রথম ২ ও শেষ ২ রেকর্ড দেখানোর ফরম্যাট (শো ডাটা)"""
-    text = "অ্যাডমিন আইডি: `{}`\n\n".format(ADMIN_USER_ID)
-    text += "প্রথম ২ ও শেষ ২ রেকর্ড:\n"
-    text += "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    text += "`{:<14} {:<4} {:<7} {:<7} {:<6} {:<10}`\n".format("পর্যায়", "সংখ্যা", "আকার", "পূর্বাভাস", "ফল", "পরিসর")
+    """Format first 2 and last 2 records (for show_data)"""
+    text = "Admin ID: `{}`\n\n".format(ADMIN_USER_ID)
+    text += "First 2 and Last 2 Records:\n"
+    text += "================================\n"
+    text += "`{:<14} {:<4} {:<7} {:<7} {:<6} {:<10}`\n".format("Period", "Num", "Size", "Pred", "Res", "Range")
     for row in first_two:
-        period_short = str(row[0])[-8:]   # শেষ ৮ ডিজিট
+        period_short = str(row[0])[-8:]
         num = str(row[1]) if row[1] is not None else "-"
         size = str(row[2]) if row[2] else "-"
         pred = str(row[3]) if row[3] else "-"
@@ -249,11 +232,11 @@ def format_data_first_last(first_two, last_two, total_count):
         res = str(row[4]) if row[4] else "-"
         rng = str(row[5]) if row[5] else "-"
         text += "`{:<14} {:<4} {:<7} {:<7} {:<6} {:<10}`\n".format(period_short, num, size, pred, res, rng)
-    text += "━━━━━━━━━━━━━━━━━━━━━━━━\n"
-    text += "মোট রেকর্ড: {}".format(total_count)
+    text += "================================\n"
+    text += "Total Records: {}".format(total_count)
     return text
 
-# ==================== প্রেডিক্টর ক্লাস ====================
+# ==================== Predictor Class ====================
 class Predictor:
     def __init__(self):
         self.history = deque(maxlen=300)
@@ -271,7 +254,7 @@ class Predictor:
         for _, num, _, _, _, _ in rows:
             if num is not None:
                 self.history.append(num)
-        print("হিস্ট্রি লোড:", len(self.history), "টি সংখ্যা")
+        print("History loaded:", len(self.history), "numbers")
 
     def update(self, num, period, prediction=None, result=None, range_pred=None):
         size = "BIG" if num >= 5 else "SMALL"
@@ -320,18 +303,16 @@ class Predictor:
     def predict_size(self):
         hist = list(self.history)
         if len(hist) < 20:
-            return "BIG", 60, "৫ • ৯", "বুলিশ", 50, "নিম্ন", "নিরপেক্ষ", "স্থিতিশীল", 50, 50
+            return "BIG", 60, "5 - 9", "BULLISH", 50, "LOW", "NEUTRAL", "STABLE", 50, 50
 
         last = hist[-1]
         last_size = "BIG" if last >= 5 else "SMALL"
 
-        # বিশেষ সংখ্যা
-        specials = {0: ("BIG", 99, "০ • ২"), 4: ("BIG", 99, "৩ • ৫"), 5: ("SMALL", 99, "৫ • ৭"), 9: ("SMALL", 99, "৭ • ৯")}
+        specials = {0: ("BIG", 99, "0 - 2"), 4: ("BIG", 99, "3 - 5"), 5: ("SMALL", 99, "5 - 7"), 9: ("SMALL", 99, "7 - 9")}
         if last in specials:
             s = specials[last]
-            return s[0], s[1], s[2], "বুলিশ", 70, "নিম্ন", "বিশেষ", "স্থিতিশীল", 90, 10
+            return s[0], s[1], s[2], "BULLISH", 70, "LOW", "SPECIAL", "STABLE", 90, 10
 
-        # ধারাবাহিকতা গণনা
         streak = 1
         for i in range(len(hist)-2, -1, -1):
             if (hist[i] >= 5) == (last >= 5):
@@ -339,7 +320,6 @@ class Predictor:
             else:
                 break
 
-        # শক্তিশালী ধারা (৫ বা তার বেশি)
         if streak >= 5:
             pred = last_size
             conf = 99
@@ -348,10 +328,10 @@ class Predictor:
             if len(nums) >= 2:
                 cnt = Counter(nums)
                 top = cnt.most_common(2)
-                rng = str(top[0][0]) + " • " + str(top[1][0])
+                rng = str(top[0][0]) + " - " + str(top[1][0])
             else:
-                rng = "৫ • ৯" if pred == "BIG" else "০ • ৪"
-            return pred, conf, rng, "শক্তিশালী বুলিশ", 72, "নিম্ন", "ড্রাগন", "স্থিতিশীল", 95, 5
+                rng = "5 - 9" if pred == "BIG" else "0 - 4"
+            return pred, conf, rng, "STRONG BULLISH", 72, "LOW", "DRAGON", "STABLE", 95, 5
 
         if streak == 4:
             pred = last_size
@@ -361,10 +341,10 @@ class Predictor:
             if len(nums) >= 2:
                 cnt = Counter(nums)
                 top = cnt.most_common(2)
-                rng = str(top[0][0]) + " • " + str(top[1][0])
+                rng = str(top[0][0]) + " - " + str(top[1][0])
             else:
-                rng = "৫ • ৯" if pred == "BIG" else "০ • ৪"
-            return pred, conf, rng, "বুলিশ", 68, "নিম্ন", "৪-ধারা", "স্থিতিশীল", 90, 10
+                rng = "5 - 9" if pred == "BIG" else "0 - 4"
+            return pred, conf, rng, "BULLISH", 68, "LOW", "4-STREAK", "STABLE", 90, 10
 
         if streak == 3:
             pred = "SMALL" if last_size == "BIG" else "BIG"
@@ -374,10 +354,10 @@ class Predictor:
             if len(nums) >= 2:
                 cnt = Counter(nums)
                 top = cnt.most_common(2)
-                rng = str(top[0][0]) + " • " + str(top[1][0])
+                rng = str(top[0][0]) + " - " + str(top[1][0])
             else:
-                rng = "৫ • ৯" if pred == "BIG" else "০ • ৪"
-            return pred, conf, rng, "বিয়ারিশ", 55, "মাঝারি", "৩-ধারা ভাঙন", "অস্থিতিশীল", 75, 25
+                rng = "5 - 9" if pred == "BIG" else "0 - 4"
+            return pred, conf, rng, "BEARISH", 55, "MEDIUM", "3-STREAK BREAK", "UNSTABLE", 75, 25
 
         if streak == 2:
             pred = "SMALL" if last_size == "BIG" else "BIG"
@@ -387,12 +367,11 @@ class Predictor:
             if len(nums) >= 2:
                 cnt = Counter(nums)
                 top = cnt.most_common(2)
-                rng = str(top[0][0]) + " • " + str(top[1][0])
+                rng = str(top[0][0]) + " - " + str(top[1][0])
             else:
-                rng = "৫ • ৯" if pred == "BIG" else "০ • ৪"
-            return pred, conf, rng, "নিরপেক্ষ", 52, "মাঝারি", "২-ধারা ভাঙন", "স্থিতিশীল", 70, 30
+                rng = "5 - 9" if pred == "BIG" else "0 - 4"
+            return pred, conf, rng, "NEUTRAL", 52, "MEDIUM", "2-STREAK BREAK", "STABLE", 70, 30
 
-        # একান্তর প্যাটার্ন
         def is_alt(l):
             if len(hist) < l:
                 return False
@@ -409,10 +388,10 @@ class Predictor:
             if len(nums) >= 2:
                 cnt = Counter(nums)
                 top = cnt.most_common(2)
-                rng = str(top[0][0]) + " • " + str(top[1][0])
+                rng = str(top[0][0]) + " - " + str(top[1][0])
             else:
-                rng = "৫ • ৯" if pred == "BIG" else "০ • ৪"
-            return pred, conf, rng, "বুলিশ", 65, "নিম্ন", "একান্তর ৮", "স্থিতিশীল", 85, 15
+                rng = "5 - 9" if pred == "BIG" else "0 - 4"
+            return pred, conf, rng, "BULLISH", 65, "LOW", "ALTERNATING 8", "STABLE", 85, 15
 
         if is_alt(6):
             pred = "SMALL" if last_size == "BIG" else "BIG"
@@ -422,10 +401,10 @@ class Predictor:
             if len(nums) >= 2:
                 cnt = Counter(nums)
                 top = cnt.most_common(2)
-                rng = str(top[0][0]) + " • " + str(top[1][0])
+                rng = str(top[0][0]) + " - " + str(top[1][0])
             else:
-                rng = "৫ • ৯" if pred == "BIG" else "০ • ৪"
-            return pred, conf, rng, "বুলিশ", 60, "নিম্ন", "একান্তর ৬", "স্থিতিশীল", 80, 20
+                rng = "5 - 9" if pred == "BIG" else "0 - 4"
+            return pred, conf, rng, "BULLISH", 60, "LOW", "ALTERNATING 6", "STABLE", 80, 20
 
         if is_alt(5):
             pred = last_size
@@ -435,29 +414,28 @@ class Predictor:
             if len(nums) >= 2:
                 cnt = Counter(nums)
                 top = cnt.most_common(2)
-                rng = str(top[0][0]) + " • " + str(top[1][0])
+                rng = str(top[0][0]) + " - " + str(top[1][0])
             else:
-                rng = "৫ • ৯" if pred == "BIG" else "০ • ৪"
-            return pred, conf, rng, "নিরপেক্ষ", 55, "মাঝারি", "ফাঁদ", "স্থিতিশীল", 72, 28
+                rng = "5 - 9" if pred == "BIG" else "0 - 4"
+            return pred, conf, rng, "NEUTRAL", 55, "MEDIUM", "TRAP", "STABLE", 72, 28
 
-        # এমএ, আরএসআই, ভারসাম্য বিশ্লেষণ
         ma5 = self.ma(hist, 5)
         ma10 = self.ma(hist, 10)
         ma20 = self.ma(hist, 20)
         if ma5 > ma10 and ma10 > ma20:
-            ma_trend = "বুলিশ"
+            ma_trend = "BULLISH"
         elif ma5 < ma10 and ma10 < ma20:
-            ma_trend = "বিয়ারিশ"
+            ma_trend = "BEARISH"
         else:
-            ma_trend = "নিরপেক্ষ"
+            ma_trend = "NEUTRAL"
 
         rsi_val = self.rsi(hist, 14)
         if rsi_val < 30:
-            rsi_trend = "বুলিশ"
+            rsi_trend = "BULLISH"
         elif rsi_val > 70:
-            rsi_trend = "বিয়ারিশ"
+            rsi_trend = "BEARISH"
         else:
-            rsi_trend = "নিরপেক্ষ"
+            rsi_trend = "NEUTRAL"
 
         recent_30 = hist[-30:] if len(hist) >= 30 else hist
         big_c = sum(1 for x in recent_30 if x >= 5)
@@ -465,24 +443,23 @@ class Predictor:
 
         std = self.std_dev(hist, 20)
         if std < 1.5:
-            std_text = "নিম্ন"
+            std_text = "LOW"
         elif std < 2.5:
-            std_text = "মাঝারি"
+            std_text = "MEDIUM"
         else:
-            std_text = "উচ্চ"
+            std_text = "HIGH"
 
-        # ভোটিং
         votes = {"BIG": 0, "SMALL": 0}
         votes["SMALL" if last_size == "BIG" else "BIG"] += 1
 
-        if ma_trend == "বুলিশ":
+        if ma_trend == "BULLISH":
             votes["BIG"] += 3
-        elif ma_trend == "বিয়ারিশ":
+        elif ma_trend == "BEARISH":
             votes["SMALL"] += 3
 
-        if rsi_trend == "বুলিশ":
+        if rsi_trend == "BULLISH":
             votes["BIG"] += 2
-        elif rsi_trend == "বিয়ারিশ":
+        elif rsi_trend == "BEARISH":
             votes["SMALL"] += 2
 
         if big_c > small_c + 3:
@@ -503,15 +480,9 @@ class Predictor:
 
         big_pct = int((votes["BIG"] / total) * 100) if total > 0 else 50
         small_pct = int((votes["SMALL"] / total) * 100) if total > 0 else 50
+        pattern_text = "ALTERNATING" if is_alt(4) else "RANDOM"
+        cycle_text = "STABLE" if std < 1.5 else "UNSTABLE"
 
-        # প্যাটার্ন ও সাইকেল
-        if is_alt(4):
-            pattern_text = "একান্তর"
-        else:
-            pattern_text = "এলোমেলো"
-        cycle_text = "স্থিতিশীল" if std < 1.5 else "অস্থিতিশীল"
-
-        # পরিসর
         recent = hist[-20:] if len(hist) >= 20 else hist
         if pred == "BIG":
             nums = [x for x in recent if x >= 5]
@@ -520,9 +491,9 @@ class Predictor:
         if len(nums) >= 2:
             cnt = Counter(nums)
             top = cnt.most_common(2)
-            rng = str(top[0][0]) + " • " + str(top[1][0])
+            rng = str(top[0][0]) + " - " + str(top[1][0])
         else:
-            rng = "৫ • ৯" if pred == "BIG" else "০ • ৪"
+            rng = "5 - 9" if pred == "BIG" else "0 - 4"
 
         return pred, conf, rng, ma_trend, rsi_val, std_text, pattern_text, cycle_text, big_pct, small_pct
 
@@ -564,16 +535,16 @@ class Predictor:
 
     def start(self, chat_id):
         if self.running:
-            self.send_message("ইতিমধ্যে চলছে...", chat_id=chat_id)
+            self.send_message("Already running...", chat_id=chat_id)
             return
         self.running = True
         self.chat_id = chat_id
-        self.send_message("পূর্বাভাস শুরু! (শুধু আত্মবিশ্বাস >= ৮৫%)", chat_id=chat_id)
+        self.send_message("Prediction started! (Only confidence >= 85%)", chat_id=chat_id)
         threading.Thread(target=self._loop, daemon=True).start()
 
     def stop(self, chat_id=None):
         self.running = False
-        self.send_message("বন্ধ করা হয়েছে।", chat_id=chat_id)
+        self.send_message("Stopped.", chat_id=chat_id)
 
     def _loop(self):
         seen = set()
@@ -632,10 +603,10 @@ class Predictor:
 
                 time.sleep(1)
             except Exception as e:
-                print("লুপ সমস্যা:", e)
+                print("Loop error:", e)
                 time.sleep(2)
 
-# ==================== টেলিগ্রাম হ্যান্ডলার ====================
+# ==================== Telegram Handler ====================
 predictor = Predictor()
 last_update_id = 0
 
@@ -657,9 +628,9 @@ def get_updates(offset=None):
 def main():
     global last_update_id
     print("=" * 50)
-    print("বট চালু হচ্ছে... (SQLite, বাংলা)")
-    print("ডাটাবেস ফাইল:", DB_FILE)
-    print("অ্যাডমিন আইডি:", ADMIN_USER_ID)
+    print("Bot starting... (SQLite, English)")
+    print("Database file:", DB_FILE)
+    print("Admin ID:", ADMIN_USER_ID)
     print("=" * 50)
 
     while True:
@@ -673,12 +644,12 @@ def main():
                     user_id = msg["from"]["id"]
                     text = msg.get("text", "")
 
-                    print("ইউজার:", user_id, "চ্যাট:", chat_id, "টেক্সট:", text)
+                    print("User:", user_id, "Chat:", chat_id, "Text:", text)
 
                     if not is_authorized(user_id):
                         http_post_json(TELEGRAM_API + "sendMessage", {
                             "chat_id": chat_id,
-                            "text": "আপনি অনুমোদিত নন।",
+                            "text": "You are not authorized.",
                             "parse_mode": "Markdown"
                         }, timeout=10)
                         continue
@@ -686,25 +657,25 @@ def main():
                     if text == "/start":
                         keyboard = {
                             "inline_keyboard": [
-                                [{"text": "শুরু", "callback_data": "start"}],
-                                [{"text": "বন্ধ", "callback_data": "stop"}],
-                                [{"text": "পরিসংখ্যান", "callback_data": "status"}],
+                                [{"text": "START", "callback_data": "start"}],
+                                [{"text": "STOP", "callback_data": "stop"}],
+                                [{"text": "STATUS", "callback_data": "status"}],
                             ]
                         }
                         if is_admin(user_id):
-                            keyboard["inline_keyboard"].append([{"text": "ডেটা দেখুন", "callback_data": "show_data"}])
+                            keyboard["inline_keyboard"].append([{"text": "SHOW DATA", "callback_data": "show_data"}])
                         
-                        keyboard["inline_keyboard"].append([{"text": "যোগাযোগ", "url": "https://t.me/your_username"}])
+                        keyboard["inline_keyboard"].append([{"text": "CONTACT", "url": "https://t.me/your_username"}])
                         
-                        start_text = "শুভ এআই সংস্করণ ৪.০ (SQLite)\n\n"
-                        start_text += "প্রতি পর্বে পূর্বাভাস প্রদান করে\n"
-                        start_text += "সকল ডেটা SQLite ডাটাবেসে সংরক্ষিত হয়\n"
-                        start_text += "আপনার আইডি: `{}`\n".format(user_id)
+                        start_text = "SUBHA AI v4.0 (SQLite)\n\n"
+                        start_text += "Provides prediction for each period.\n"
+                        start_text += "All data is stored in SQLite database.\n"
+                        start_text += "Your ID: `{}`\n".format(user_id)
                         if is_admin(user_id):
-                            start_text += "আপনি অ্যাডমিন\n"
-                            start_text += "/show_data - ডেটা দেখতে ব্যবহার করুন\n"
+                            start_text += "You are admin.\n"
+                            start_text += "/show_data - View first 2 and last 2 records.\n"
                         else:
-                            start_text += "শুধু অ্যাডমিন ডেটা দেখতে পারবেন\n"
+                            start_text += "Only admin can view data.\n"
                         
                         http_post_json(TELEGRAM_API + "sendMessage", {
                             "chat_id": chat_id,
@@ -717,11 +688,10 @@ def main():
                         if not is_admin(user_id):
                             http_post_json(TELEGRAM_API + "sendMessage", {
                                 "chat_id": chat_id,
-                                "text": "অনুমতি নেই। শুধুমাত্র অ্যাডমিন দেখতে পারবেন।",
+                                "text": "Access denied. Admin only.",
                                 "parse_mode": "Markdown"
                             }, timeout=10)
                             continue
-                        # প্রথম ২ ও শেষ ২ রেকর্ড আনা
                         try:
                             conn = sqlite3.connect(DB_FILE)
                             c = conn.cursor()
@@ -730,7 +700,6 @@ def main():
                             c.execute("SELECT period, number, size, prediction, result, range_pred FROM rounds ORDER BY period DESC LIMIT 2")
                             last_two = c.fetchall()
                             conn.close()
-                            # শেষ দুটোকে ক্রমানুসারে সাজানো (পুরোনো -> নতুন)
                             last_two_sorted = sorted(last_two, key=lambda x: x[0])
                             response = format_data_first_last(first_two, last_two_sorted, get_total_count())
                             http_post_json(TELEGRAM_API + "sendMessage", {
@@ -741,7 +710,7 @@ def main():
                         except Exception as e:
                             http_post_json(TELEGRAM_API + "sendMessage", {
                                 "chat_id": chat_id,
-                                "text": "ডেটা দেখাতে সমস্যা: {}".format(str(e))
+                                "text": "Error fetching data: {}".format(str(e))
                             }, timeout=10)
 
                 cb = update.get("callback_query")
@@ -750,30 +719,38 @@ def main():
                     user_id = cb["from"]["id"]
                     data = cb["data"]
                     cb_id = cb["id"]
-                    http_post_json(TELEGRAM_API + "answerCallbackQuery", {"callback_query_id": cb_id}, timeout=5)
-
-                    print("ক্লিক - ইউজার:", user_id, "চ্যাট:", chat_id, "ডেটা:", data)
+                    
+                    print("Callback - User:", user_id, "Chat:", chat_id, "Data:", data)
 
                     if not is_authorized(user_id):
+                        # Send a toast alert to the user
+                        http_post_json(TELEGRAM_API + "answerCallbackQuery", {
+                            "callback_query_id": cb_id,
+                            "text": "You are not authorized!",
+                            "show_alert": True
+                        }, timeout=5)
                         continue
+
+                    # Answer callback to remove loading state
+                    http_post_json(TELEGRAM_API + "answerCallbackQuery", {"callback_query_id": cb_id}, timeout=5)
 
                     if data == "start":
                         predictor.start(chat_id)
                     elif data == "stop":
                         predictor.stop(chat_id)
                     elif data == "status":
-                        stats = "পরিসংখ্যান\n"
-                        stats += "জয়: {}\n".format(predictor.wins)
-                        stats += "পরাজয়: {}\n".format(predictor.losses)
-                        stats += "বর্তমান ধারা: {}\n".format(predictor.streak)
-                        stats += "সর্বোচ্চ ধারা: {}\n".format(predictor.best_streak)
-                        stats += "মোট পূর্বাভাস: {}".format(predictor.total_predictions)
+                        stats = "STATISTICS\n"
+                        stats += "Wins: {}\n".format(predictor.wins)
+                        stats += "Losses: {}\n".format(predictor.losses)
+                        stats += "Current Streak: {}\n".format(predictor.streak)
+                        stats += "Best Streak: {}\n".format(predictor.best_streak)
+                        stats += "Total Predictions: {}".format(predictor.total_predictions)
                         predictor.send_message(stats, chat_id=chat_id)
                     elif data == "show_data":
                         if not is_admin(user_id):
                             http_post_json(TELEGRAM_API + "sendMessage", {
                                 "chat_id": chat_id,
-                                "text": "অনুমতি নেই।",
+                                "text": "Access denied. Admin only.",
                                 "parse_mode": "Markdown"
                             }, timeout=10)
                             continue
@@ -795,13 +772,14 @@ def main():
                         except Exception as e:
                             http_post_json(TELEGRAM_API + "sendMessage", {
                                 "chat_id": chat_id,
-                                "text": "ডেটা দেখাতে সমস্যা: {}".format(str(e))
+                                "text": "Error fetching data: {}".format(str(e))
                             }, timeout=10)
 
             time.sleep(1)
         except Exception as e:
-            print("মূল সমস্যা:", e)
+            print("Main error:", e)
             time.sleep(5)
 
 if __name__ == "__main__":
+    init_db()
     main()
