@@ -1,26 +1,32 @@
-import time, threading, math, sqlite3, json, urllib.request, urllib.error, urllib.parse
+# ==================== Complete Bot with Google Sheets Auth ====================
+import time
+import threading
+import math
+import sqlite3
+import json
+import urllib.request
+import urllib.error
+import urllib.parse
 from collections import deque, Counter
 from datetime import datetime
 
-# ==================== CONFIGURATION ====================
-BOT_TOKEN = "7616902302:AAEp4VjUFX9mfBqYuc_ZY7pfuntVvQ8dpWE"               # 🔁 Replace
+# ---------------------- Configuration ----------------------
+BOT_TOKEN = "7616902302:AAEp4VjUFX9mfBqYuc_ZY7pfuntVvQ8dpWE"               # 🔁 Replace with your bot token
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}/"
 API_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json?ts={}"
 
-# Google Sheet CSV export URL (publicly readable)
-SHEET_ID = "1Tbpkg2licG_RxRV4yCgtJ9KJEoCafuW0IFYZ5_SKXeI"          # 🔁 Replace
+# Google Sheet CSV export URL
+SHEET_ID = "1Tbpkg2licG_RxRV4yCgtJ9KJEoCafuW0IFYZ5_SKXeI"          # 🔁 Replace with your sheet ID
 SHEET_CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
-# Admins who can see SHOW DATA button (hardcoded for now)
-ADMIN_USER_IDS = {5824157133}                   # 🔁 Replace
+# Hardcoded admin Telegram IDs (can be extended via sheet later)
+ADMIN_USER_IDS = {5824157133}                   # 🔁 Replace with admin IDs
 
-# ==================== GOOGLE SHEETS SYNC ====================
+# ---------------------- Google Sheets Sync ----------------------
 sheet_data_cache = []
-sheet_last_fetch = 0
 sheet_lock = threading.Lock()
 
 def fetch_sheet_csv(url):
-    """Download CSV from Google Sheets."""
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=15) as resp:
@@ -30,9 +36,6 @@ def fetch_sheet_csv(url):
         return None
 
 def parse_sheet(csv_text):
-    """Parse CSV into list of dicts.
-    Expected columns: Name, Username, Telegram ID, UID, Expired (Date and Time)
-    """
     lines = csv_text.strip().split('\n')
     if len(lines) < 2:
         return []
@@ -57,41 +60,39 @@ def parse_sheet(csv_text):
     return users
 
 def refresh_sheet_cache():
-    """Refresh the local sheet cache every 60 seconds."""
-    global sheet_data_cache, sheet_last_fetch
+    global sheet_data_cache
     while True:
         csv_text = fetch_sheet_csv(SHEET_CSV_URL)
         if csv_text:
             parsed = parse_sheet(csv_text)
             with sheet_lock:
                 sheet_data_cache = parsed
-                sheet_last_fetch = time.time()
         time.sleep(60)
 
-# Start background sheet refresher
 threading.Thread(target=refresh_sheet_cache, daemon=True).start()
 
 def get_user_info(user_id):
-    """Return user dict from sheet if ID exists and not expired, else None or deactivated flag.
-    Returns: (status, info_dict)
-        status: 'active', 'deactive', 'not_found'
-    """
+    """Returns (status, info_dict) where status is 'active', 'deactive', or 'not_found'."""
     with sheet_lock:
         for user in sheet_data_cache:
             if user.get('telegram_id') == user_id:
-                # Check expiration
-                expired_str = user.get('Expired (Date and Time)', '')
+                expired_str = user.get('Expired (Date and Time)', '').strip()
                 if expired_str:
-                    try:
-                        expired_dt = datetime.strptime(expired_str, "%Y-%m-%d %H:%M:%S")
-                        if datetime.now() > expired_dt:
-                            return 'deactive', user
-                    except:
-                        pass
+                    # Support multiple date formats
+                    fmts = ["%Y-%m-%d %H:%M:%S", "%m/%d/%Y %H:%M:%S"]
+                    expired_dt = None
+                    for fmt in fmts:
+                        try:
+                            expired_dt = datetime.strptime(expired_str, fmt)
+                            break
+                        except ValueError:
+                            pass
+                    if expired_dt and datetime.now() > expired_dt:
+                        return 'deactive', user
                 return 'active', user
     return 'not_found', None
 
-# ==================== DATABASE ====================
+# ---------------------- Database ----------------------
 def init_db():
     conn = sqlite3.connect('predictions.db')
     c = conn.cursor()
@@ -99,18 +100,24 @@ def init_db():
                  (period TEXT PRIMARY KEY, number INTEGER, size TEXT,
                   prediction TEXT, result TEXT, range_pred TEXT,
                   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-    try: c.execute("ALTER TABLE rounds ADD COLUMN range_pred TEXT")
-    except: pass
-    try: c.execute("ALTER TABLE rounds ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-    except: pass
-    conn.commit(); conn.close()
+    try:
+        c.execute("ALTER TABLE rounds ADD COLUMN range_pred TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE rounds ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+    except sqlite3.OperationalError:
+        pass
+    conn.commit()
+    conn.close()
 
 def save_round(period, number, size, prediction, result, range_pred):
     conn = sqlite3.connect('predictions.db')
     c = conn.cursor()
     c.execute('''INSERT OR REPLACE INTO rounds VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)''',
               (period, number, size, prediction, result, range_pred))
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
 def load_recent_history(limit=300):
     conn = sqlite3.connect('predictions.db')
@@ -139,13 +146,14 @@ def get_first_and_last():
 
 init_db()
 
-# ==================== HTTP HELPERS ====================
+# ---------------------- HTTP Helpers ----------------------
 def http_get_json(url, timeout=10):
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode('utf-8'))
-    except: return None
+    except:
+        return None
 
 def http_post_json(url, payload, timeout=10):
     try:
@@ -153,9 +161,10 @@ def http_post_json(url, payload, timeout=10):
         req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.read().decode('utf-8')
-    except: return None
+    except:
+        return None
 
-# ==================== UI FORMATTERS ====================
+# ---------------------- UI Formatting ----------------------
 def format_prediction_ui(pred_data, period):
     size = pred_data["size"]
     conf = pred_data["confidence"]
@@ -230,14 +239,29 @@ def format_result_ui(period, number, actual_size, result, pred, range_pred):
 """
 
 def format_profile(user_info):
+    name = user_info.get('Name','')
+    username = user_info.get('Username','')
+    uid = user_info.get('UID','')
+    tid = user_info.get('Telegram ID','')
+    exp_raw = user_info.get('Expired (Date and Time)','')
+    # Try to format date nicely
+    try:
+        exp_dt = datetime.strptime(exp_raw, "%Y-%m-%d %H:%M:%S")
+        exp_formatted = exp_dt.strftime("%d/%m/%Y %H:%M:%S")
+    except:
+        try:
+            exp_dt = datetime.strptime(exp_raw, "%m/%d/%Y %H:%M:%S")
+            exp_formatted = exp_dt.strftime("%d/%m/%Y %H:%M:%S")
+        except:
+            exp_formatted = exp_raw
     return f"""
 🧑‍💼 *Profile*
 ━━━━━━━━━━━━━━━━━━━━━━
-👤 Name      : {user_info.get('Name','')}
-📛 Username  : @{user_info.get('Username','')}
-🆔 ID        : {user_info.get('Telegram ID','')}
-🔢 UID       : {user_info.get('UID','')}
-⏳ Expired   : {user_info.get('Expired (Date and Time)','')}
+👤 Name      : {name}
+📛 Username  : @{username}
+🆔 ID        : {tid}
+🔢 UID       : {uid}
+⏳ Expired   : {exp_formatted}
 ━━━━━━━━━━━━━━━━━━━━━━
 """
 
@@ -252,10 +276,11 @@ def format_first_last_ui(first_two, last_two):
     text += f"\n👑 *Admin IDs:* {', '.join(str(i) for i in ADMIN_USER_IDS)}\n" + "━"*30
     return text
 
-# ==================== PREDICTOR CLASS ====================
+# ---------------------- Predictor Class ----------------------
 class Predictor:
-    def __init__(self, chat_id):
+    def __init__(self, chat_id, user_id):
         self.chat_id = chat_id
+        self.user_id = user_id
         self.history = deque(maxlen=300)
         self.wins = 0
         self.losses = 0
@@ -280,26 +305,30 @@ class Predictor:
             ts = int(time.time()*1000)
             data = http_get_json(API_URL.format(ts))
             return data.get("data",{}).get("list",[]) if data else []
-        except: return []
+        except:
+            return []
 
-    # ... indicators and predict_size() remain identical to previous code ...
-    # (I'll include the full predict_size() for completeness)
+    # ---- Indicators ----
     def ma(self, data, w):
-        if len(data)>=w: return sum(data[-w:])/w
+        if len(data)>=w:
+            return sum(data[-w:])/w
         return sum(data)/len(data) if data else 0
 
     def rsi(self, data, w=14):
-        if len(data)<w+1: return 50
+        if len(data)<w+1:
+            return 50
         g=l=0
         for i in range(1,w+1):
             d = data[-i]-data[-i-1]
             if d>0: g+=d
             else: l+=abs(d)
-        if l==0: return 100
+        if l==0:
+            return 100
         return 100 - (100/(1+(g/l)))
 
     def std_dev(self, data, w=20):
-        if len(data)<w: return 0
+        if len(data)<w:
+            return 0
         recent=data[-w:]
         mean=sum(recent)/w
         return math.sqrt(sum((x-mean)**2 for x in recent)/w)
@@ -309,23 +338,29 @@ class Predictor:
         if len(hist)<20:
             return "BIG",60,"5 • 9","BULLISH",50,"LOW","NEUTRAL","STABLE",50,50
 
-        last=hist[-1]; last_size="BIG" if last>=5 else "SMALL"
+        last=hist[-1]
+        last_size="BIG" if last>=5 else "SMALL"
 
-        # fixed specials (corrected)
-        specials={0:("SMALL",99,"0 • 2"),4:("SMALL",99,"3 • 5"),
-                  5:("BIG",99,"5 • 7"),9:("SMALL",99,"7 • 9")}
+        # Fixed special numbers
+        specials={0:("SMALL",99,"0 • 2"), 4:("SMALL",99,"3 • 5"),
+                  5:("BIG",99,"5 • 7"), 9:("SMALL",99,"7 • 9")}
         if last in specials:
-            s=specials[last]; return s[0],s[1],s[2],"BULLISH",70,"LOW","SPECIAL","STABLE",90,10
+            s=specials[last]
+            return s[0],s[1],s[2],"BULLISH",70,"LOW","SPECIAL","STABLE",90,10
 
         streak=1
         for i in range(len(hist)-2,-1,-1):
-            if (hist[i]>=5)==(last>=5): streak+=1
-            else: break
+            if (hist[i]>=5)==(last>=5):
+                streak+=1
+            else:
+                break
 
         def is_alt(l):
-            if len(hist)<l: return False
+            if len(hist)<l:
+                return False
             for i in range(1,l):
-                if (hist[-i]>=5)==(hist[-i-1]>=5): return False
+                if (hist[-i]>=5)==(hist[-i-1]>=5):
+                    return False
             return True
 
         def get_range(pred_type):
@@ -376,7 +411,8 @@ class Predictor:
         if big_c>small_c+3: votes["SMALL"]+=2
         elif small_c>big_c+3: votes["BIG"]+=2
         pred=max(votes,key=votes.get)
-        total=sum(votes.values()); diff=votes[pred]-(total-votes[pred])
+        total=sum(votes.values())
+        diff=votes[pred]-(total-votes[pred])
         conf=92 if diff>=4 else 85 if diff>=2 else 70
         big_pct=int(votes["BIG"]/total*100) if total else 50
         small_pct=int(votes["SMALL"]/total*100) if total else 50
@@ -387,87 +423,129 @@ class Predictor:
 
     def get_next_prediction(self):
         size,conf,rng,ma,rsi,std,pattern,cycle,big_pct,small_pct=self.predict_size()
-        return {"size":size,"confidence":conf,"range":rng,"ma":ma,"rsi":rsi,"std":std,
-                "pattern":pattern,"cycle":cycle,"big_pct":big_pct,"small_pct":small_pct}
+        return {
+            "size":size,"confidence":conf,"range":rng,
+            "ma":ma,"rsi":rsi,"std":std,
+            "pattern":pattern,"cycle":cycle,
+            "big_pct":big_pct,"small_pct":small_pct
+        }
 
     def update_result(self, won):
-        if won: self.wins+=1; self.streak+=1; self.best_streak=max(self.best_streak,self.streak)
-        else: self.losses+=1; self.streak=0
+        if won:
+            self.wins+=1
+            self.streak+=1
+            if self.streak>self.best_streak:
+                self.best_streak=self.streak
+        else:
+            self.losses+=1
+            self.streak=0
         self.total_predictions+=1
 
     def send_message(self, text):
         if self.chat_id:
-            try: http_post_json(TELEGRAM_API+"sendMessage",
-                                {"chat_id":self.chat_id,"text":text,"parse_mode":"Markdown"})
-            except: pass
+            try:
+                http_post_json(TELEGRAM_API+"sendMessage",
+                               {"chat_id":self.chat_id,"text":text,"parse_mode":"Markdown"})
+            except:
+                pass
 
     def start_loop(self):
-        if self.running: return
+        if self.running:
+            return
         self.running=True
-        threading.Thread(target=self._loop,daemon=True).start()
+        threading.Thread(target=self._loop, daemon=True).start()
 
     def stop_loop(self):
         self.running=False
 
     def _loop(self):
-        seen=set(); current_prediction=None
+        seen=set()
+        current_prediction=None
         while self.running:
+            # Check user still active
+            status, _ = get_user_info(self.user_id)
+            if status != 'active':
+                self.running = False
+                self.send_message("⛔ Your session has been terminated (not authorized or expired).")
+                break
+
             try:
                 data=self.fetch_data()
-                if not data: time.sleep(1); continue
-                latest=data[0]; period=latest.get("issueNumber","")
-                try: number=int(latest.get("number",""))
-                except: number=None
-                if not period or not period.isdigit(): time.sleep(1); continue
+                if not data:
+                    time.sleep(1)
+                    continue
+                latest=data[0]
+                period=latest.get("issueNumber","")
+                try:
+                    number=int(latest.get("number",""))
+                except:
+                    number=None
+                if not period or not period.isdigit():
+                    time.sleep(1)
+                    continue
                 if period not in seen:
-                    if number is not None: self.update(number,period)
+                    if number is not None:
+                        self.update(number,period)
                     seen.add(period)
                     next_period=str(int(period)+1)
                     pred_data=self.get_next_prediction()
                     if pred_data["confidence"]>=85:
-                        current_prediction={"period":next_period,"size":pred_data["size"],"range":pred_data["range"]}
+                        current_prediction={
+                            "period":next_period,
+                            "size":pred_data["size"],
+                            "range":pred_data["range"]
+                        }
                         self.send_message(format_prediction_ui(pred_data,next_period))
                 if current_prediction and current_prediction["period"]==period and number is not None:
                     actual_size="BIG" if number>=5 else "SMALL"
                     won=(actual_size==current_prediction["size"])
                     res="WIN" if won else "LOSS"
                     self.update_result(won)
-                    self.update(number,period,prediction=current_prediction["size"],
-                                result=res,range_pred=current_prediction["range"])
+                    self.update(number,period,
+                                prediction=current_prediction["size"],
+                                result=res,
+                                range_pred=current_prediction["range"])
                     self.send_message(format_result_ui(period,number,actual_size,res,
-                                                       current_prediction["size"],current_prediction["range"]))
+                                                       current_prediction["size"],
+                                                       current_prediction["range"]))
                     current_prediction=None
                 time.sleep(1)
             except Exception as e:
-                print("Loop error:",e); time.sleep(2)
+                print("Loop error:",e)
+                time.sleep(2)
 
-# ==================== BOT HANDLER ====================
-predictors = {}   # chat_id -> Predictor instance
+# ---------------------- Telegram Update Handlers ----------------------
+predictors = {}   # chat_id -> Predictor
 last_update_id = 0
 
 def get_updates(offset=None):
     url = TELEGRAM_API + "getUpdates"
     params = {"timeout":30}
-    if offset: params["offset"]=offset
+    if offset:
+        params["offset"] = offset
     try:
         full_url = url + "?" + urllib.parse.urlencode(params)
         data = http_get_json(full_url, timeout=35)
         return data.get("result",[]) if data else []
-    except: return []
+    except:
+        return []
 
-def process_message(chat_id, user_id, text=None):
-    """Handle /start and /show_data commands."""
+def process_message(chat_id, user_id, text):
     if text == "/start":
         status, info = get_user_info(user_id)
         if status == "not_found":
             http_post_json(TELEGRAM_API+"sendMessage",
-                           {"chat_id":chat_id,"text":"⛔ You are not authorized! Contact admin.","parse_mode":"Markdown"})
+                           {"chat_id":chat_id,
+                            "text":"⛔ You are not authorized! Contact admin.",
+                            "parse_mode":"Markdown"})
             return
         elif status == "deactive":
             http_post_json(TELEGRAM_API+"sendMessage",
-                           {"chat_id":chat_id,"text":"🚫 Your account has been deactivated. Contact admin.","parse_mode":"Markdown"})
+                           {"chat_id":chat_id,
+                            "text":"🚫 Your account has been deactivated. Contact admin.",
+                            "parse_mode":"Markdown"})
             return
-        # Active user: show welcome with dynamic buttons
+        # Active user
         name = info.get("Name","User")
         is_admin = user_id in ADMIN_USER_IDS
         buttons = [
@@ -479,7 +557,7 @@ def process_message(chat_id, user_id, text=None):
         if is_admin:
             buttons.append([{"text":"📊 SHOW DATA","callback_data":"show_data"}])
         else:
-            buttons.append([{"text":"📞 CONTACT","url":"https://t.me/your_username"}])  # 🔁 update
+            buttons.append([{"text":"📞 CONTACT","url":"https://t.me/your_username"}])  # 🔁 change contact
         http_post_json(TELEGRAM_API+"sendMessage",{
             "chat_id":chat_id,
             "text":f"🤖 Predictor v1.0.0\nWelcome {name}\n\nUse buttons below.",
@@ -500,8 +578,7 @@ def process_message(chat_id, user_id, text=None):
         http_post_json(TELEGRAM_API+"sendMessage",{"chat_id":chat_id,"text":resp,"parse_mode":"Markdown"})
 
 def process_callback(chat_id, user_id, data):
-    """Handle inline button presses."""
-    # First check user status from sheet
+    # Check user status
     status, info = get_user_info(user_id)
     if status == "not_found":
         http_post_json(TELEGRAM_API+"sendMessage",
@@ -512,9 +589,9 @@ def process_callback(chat_id, user_id, data):
                        {"chat_id":chat_id,"text":"🚫 Your account has been deactivated. Contact admin.","parse_mode":"Markdown"})
         return
 
-    # Get or create per-chat predictor
+    # Get or create predictor for this chat
     if chat_id not in predictors:
-        predictors[chat_id] = Predictor(chat_id)
+        predictors[chat_id] = Predictor(chat_id, user_id)
     pred = predictors[chat_id]
 
     if data == "start":
@@ -527,7 +604,12 @@ def process_callback(chat_id, user_id, data):
         pred.stop_loop()
         pred.send_message("⏹ Stopped.")
     elif data == "status":
-        stats = f"📊 *Statistics*\n✅ Wins: {pred.wins}\n❌ Losses: {pred.losses}\n🔥 Streak: {pred.streak}\n🏆 Best Streak: {pred.best_streak}\n📈 Total: {pred.total_predictions}"
+        stats = (f"📊 *Statistics*\n"
+                 f"✅ Wins: {pred.wins}\n"
+                 f"❌ Losses: {pred.losses}\n"
+                 f"🔥 Streak: {pred.streak}\n"
+                 f"🏆 Best Streak: {pred.best_streak}\n"
+                 f"📈 Total: {pred.total_predictions}")
         pred.send_message(stats)
     elif data == "profile":
         if info:
@@ -547,7 +629,7 @@ def process_callback(chat_id, user_id, data):
 
 def main():
     global last_update_id
-    print("Bot started with Google Sheets authorization and per-user sessions.")
+    print("Bot started with Google Sheets authorization...")
     while True:
         try:
             updates = get_updates(last_update_id+1 if last_update_id else None)
