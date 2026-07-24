@@ -1,4 +1,4 @@
-# ==================== সম্পূর্ণ বট (SQLite + শুধু ডেটা ভিউ) ====================
+# ==================== ডিবাগ ভার্সন (শুধু অ্যাডমিন START চেক) ====================
 import time
 import threading
 import math
@@ -11,11 +11,11 @@ from collections import deque, Counter
 
 # ---------- কনফিগারেশন ----------
 API_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json?ts={}"
-BOT_TOKEN = "7616902302:AAEp4VjUFX9mfBqYuc_ZY7pfuntVvQ8dpWE"   # আপনার টোকেন দিন
+BOT_TOKEN = "7616902302:AAEp4VjUFX9mfBqYuc_ZY7pfuntVvQ8dpWE"
 TELEGRAM_API = "https://api.telegram.org/bot{}/".format(BOT_TOKEN)
 
-# ==================== অ্যাডমিন ও অথরাইজেশন ====================
-ADMIN_USER_ID = 5824157133  # ← এখানে আপনার টেলিগ্রাম আইডি দিন
+# ==================== অ্যাডমিন ====================
+ADMIN_USER_ID = 5824157133  # ← আপনার আইডি দিন
 
 AUTHORIZED_USER_IDS = {
     5824157133,
@@ -30,9 +30,11 @@ def is_authorized(user_id):
 def is_admin(user_id):
     if user_id is None:
         return False
-    return user_id == ADMIN_USER_ID
+    result = user_id == ADMIN_USER_ID
+    print("🔍 is_admin চেক: user_id={}, ADMIN_USER_ID={}, result={}".format(user_id, ADMIN_USER_ID, result))
+    return result
 
-# ==================== ডাটাবেস (SQLite) ====================
+# ==================== ডাটাবেস ====================
 def init_db():
     try:
         conn = sqlite3.connect('predictions.db')
@@ -81,7 +83,6 @@ def load_recent_history(limit=300):
         return []
 
 def get_first_two():
-    """সবচেয়ে পুরোনো ২টি ডেটা"""
     try:
         conn = sqlite3.connect('predictions.db')
         c = conn.cursor()
@@ -95,7 +96,6 @@ def get_first_two():
         return []
 
 def get_last_two():
-    """সর্বশেষ ২টি ডেটা"""
     try:
         conn = sqlite3.connect('predictions.db')
         c = conn.cursor()
@@ -122,7 +122,7 @@ def get_total_count():
 
 init_db()
 
-# ==================== ইউটিলিটি ফাংশন ====================
+# ==================== HTTP ফাংশন ====================
 def http_get_json(url, timeout=10):
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -135,15 +135,19 @@ def http_get_json(url, timeout=10):
 
 def http_post_json(url, payload, timeout=10):
     try:
+        print("📤 POST পাঠানো হচ্ছে:", url)
+        print("📦 পেলোড:", payload)
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
         with urllib.request.urlopen(req, timeout=timeout) as response:
-            return response.read().decode('utf-8')
+            result = response.read().decode('utf-8')
+            print("📥 POST রেসপন্স:", result)
+            return result
     except Exception as e:
-        print("HTTP POST Error:", e)
+        print("❌ HTTP POST Error:", e)
         return None
 
-# ==================== UI ফরম্যাটিং ====================
+# ==================== UI ====================
 def format_prediction_ui(pred_data, period):
     size = pred_data["size"]
     conf = pred_data["confidence"]
@@ -228,7 +232,6 @@ def format_result_ui(period, number, actual_size, result, pred, range_pred):
     return ui
 
 def format_data_summary():
-    """শুধু প্রথম ২টি ও শেষ ২টি ডেটা দেখায়"""
     first = get_first_two()
     last = get_last_two()
     total = get_total_count()
@@ -240,7 +243,6 @@ def format_data_summary():
     text += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     text += "📌 *মোট ডেটা:* {} টি রাউন্ড\n\n".format(total)
     
-    # প্রথম ২টি ডেটা
     if first:
         text += "🔹 *সবচেয়ে পুরোনো ২টি ডেটা:*\n"
         text += "```\n"
@@ -256,7 +258,6 @@ def format_data_summary():
             text += "{:<20} {:<5} {:<7} {:<7} {:<6} {:<10}\n".format(period, number, size, pred, result, range_pred)
         text += "```\n\n"
     
-    # শেষ ২টি ডেটা
     if last:
         text += "🔹 *সর্বশেষ ২টি ডেটা:*\n"
         text += "```\n"
@@ -275,7 +276,7 @@ def format_data_summary():
     text += "\n👑 *অ্যাডমিন আইডি:* `{}`".format(ADMIN_USER_ID)
     return text
 
-# ==================== প্রেডিক্টর ক্লাস ====================
+# ==================== প্রেডিক্টর ====================
 class Predictor:
     def __init__(self):
         self.history = deque(maxlen=300)
@@ -550,28 +551,33 @@ class Predictor:
 
     def send_message(self, text, chat_id=None):
         target_chat = chat_id if chat_id is not None else self.chat_id
+        print("📨 send_message: chat_id={}, target_chat={}".format(chat_id, target_chat))
         if target_chat:
             try:
                 url = TELEGRAM_API + "sendMessage"
                 payload = {"chat_id": target_chat, "text": text, "parse_mode": "Markdown"}
                 http_post_json(url, payload, timeout=10)
-            except:
-                pass
+            except Exception as e:
+                print("❌ send_message error:", e)
 
     def start(self, chat_id):
+        print("🔥 start() কল করা হয়েছে! chat_id={}, running={}".format(chat_id, self.running))
         if self.running:
             self.send_message("⏳ ইতিমধ্যে চলছে...", chat_id=chat_id)
             return
         self.running = True
         self.chat_id = chat_id
+        print("✅ self.running=True, self.chat_id={}".format(self.chat_id))
         self.send_message("✅ প্রেডিকশন শুরু! (শুধু LEVEL 1-2: ≥85%)", chat_id=chat_id)
         threading.Thread(target=self._loop, daemon=True).start()
+        print("✅ থ্রেড চালু করা হয়েছে")
 
     def stop(self, chat_id=None):
         self.running = False
         self.send_message("⏹ বন্ধ করা হয়েছে।", chat_id=chat_id)
 
     def _loop(self):
+        print("🔄 লুপ শুরু")
         seen = set()
         predictions_sent = set()
         current_prediction = None
@@ -653,9 +659,8 @@ def get_updates(offset=None):
 def main():
     global last_update_id
     print("=" * 50)
-    print("🤖 বট চালু হচ্ছে... (SQLite + ডেটা সারাংশ)")
+    print("🤖 ডিবাগ ভার্সন চালু...")
     print("👑 অ্যাডমিন আইডি:", ADMIN_USER_ID)
-    print("📊 ডেটা ভিউ: প্রথম ২টি + শেষ ২টি")
     print("=" * 50)
 
     while True:
@@ -663,15 +668,17 @@ def main():
             updates = get_updates(last_update_id + 1 if last_update_id else None)
             for update in updates:
                 last_update_id = update["update_id"]
+                
+                # মেসেজ হ্যান্ডল
                 msg = update.get("message")
                 if msg:
                     chat_id = msg["chat"]["id"]
                     user_id = msg["from"]["id"]
                     text = msg.get("text", "")
-
-                    print("📱 ইউজার:", user_id, "চ্যাট:", chat_id)
+                    print("📩 মেসেজ: user={}, chat={}, text={}".format(user_id, chat_id, text))
 
                     if not is_authorized(user_id):
+                        print("⛔ অননুমোদিত ইউজার:", user_id)
                         http_post_json(TELEGRAM_API + "sendMessage", {
                             "chat_id": chat_id,
                             "text": "⛔ *আপনি অথরাইজড নন!*",
@@ -680,6 +687,7 @@ def main():
                         continue
 
                     if text == "/start":
+                        print("📌 /start পেয়েছি")
                         keyboard = {
                             "inline_keyboard": [
                                 [{"text": "▶️ START", "callback_data": "start"}],
@@ -688,17 +696,19 @@ def main():
                             ]
                         }
                         if is_admin(user_id):
+                            print("✅ অ্যাডমিন ডিটেক্টেড! SHOW DATA বাটন যোগ করছি")
                             keyboard["inline_keyboard"].append([{"text": "📊 SHOW DATA", "callback_data": "show_data"}])
                         
                         keyboard["inline_keyboard"].append([{"text": "📞 CONTACT", "url": "https://t.me/your_username"}])
                         
-                        start_text = "🤖 *SUBHA v6.0 (ডেটা সারাংশ)*\n\n✅ প্রতি পিরিয়ডে প্রেডিকশন\n✅ ডেটা SQLite-তে সেভ হয়\n"
+                        start_text = "🤖 *SUBHA v6.0 (ডিবাগ)*\n\n✅ প্রতি পিরিয়ডে প্রেডিকশন\n"
                         start_text += "👤 আপনার আইডি: `{}`\n".format(user_id)
                         if is_admin(user_id):
                             start_text += "✅ আপনি অ্যাডমিন\n✅ /show_data - প্রথম ২টি + শেষ ২টি ডেটা দেখুন\n"
                         else:
                             start_text += "⛔ ডেটা ভিউ শুধুমাত্র অ্যাডমিনের জন্য\n"
                         
+                        print("📤 START রেসপন্স পাঠানো হচ্ছে...")
                         http_post_json(TELEGRAM_API + "sendMessage", {
                             "chat_id": chat_id,
                             "text": start_text,
@@ -707,6 +717,7 @@ def main():
                         }, timeout=10)
                     
                     elif text == "/show_data":
+                        print("📌 /show_data পেয়েছি")
                         if not is_admin(user_id):
                             http_post_json(TELEGRAM_API + "sendMessage", {
                                 "chat_id": chat_id,
@@ -721,27 +732,35 @@ def main():
                             "parse_mode": "Markdown"
                         }, timeout=10)
 
+                # কলব্যাক হ্যান্ডল
                 cb = update.get("callback_query")
                 if cb:
                     chat_id = cb["message"]["chat"]["id"]
                     user_id = cb["from"]["id"]
                     data = cb["data"]
                     cb_id = cb["id"]
+                    print("📌 কলব্যাক: user={}, chat={}, data={}".format(user_id, chat_id, data))
+                    
                     http_post_json(TELEGRAM_API + "answerCallbackQuery", {"callback_query_id": cb_id}, timeout=5)
 
                     if not is_authorized(user_id):
+                        print("⛔ কলব্যাকে অননুমোদিত ইউজার:", user_id)
                         continue
 
                     if data == "start":
+                        print("🔥 START কলব্যাক! predictor.start({}) কল করা হচ্ছে".format(chat_id))
                         predictor.start(chat_id)
                     elif data == "stop":
+                        print("⏹ STOP কলব্যাক")
                         predictor.stop(chat_id)
                     elif data == "status":
+                        print("📊 STATUS কলব্যাক")
                         stats = "📊 *পরিসংখ্যান*\n✅ জয়: {wins}\n❌ হার: {losses}\n🔥 স্ট্রিক: {streak}\n🏆 সেরা: {best}\n📈 মোট: {total}".format(
                             wins=predictor.wins, losses=predictor.losses, streak=predictor.streak,
                             best=predictor.best_streak, total=predictor.total_predictions)
                         predictor.send_message(stats, chat_id=chat_id)
                     elif data == "show_data":
+                        print("📊 SHOW DATA কলব্যাক")
                         if not is_admin(user_id):
                             http_post_json(TELEGRAM_API + "sendMessage", {
                                 "chat_id": chat_id,
