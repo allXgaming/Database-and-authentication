@@ -8,7 +8,7 @@ TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}/"
 API_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json?ts={}"
 
 # Google Sheet CSV export URL (publicly readable)
-SHEET_ID = "https://docs.google.com/spreadsheets/d/1Tbpkg2licG_RxRV4yCgtJ9KJEoCafuW0IFYZ5_SKXeI/edit?usp=sharing"          # 🔁 Replace
+SHEET_ID = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRbulMlp7hQEM2zo0rNukTrjdD2MZh_KsaZvnZ4pHZX4WEaNv1ryofYSLQ1eHrAPHf940lnUSwWbkzQ/pub?output=csv"          # 🔁 Replace
 SHEET_CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
 
 # Admins who can see SHOW DATA button (hardcoded for now)
