@@ -1,4 +1,6 @@
-# ==================== Complete Bot (SQLite, English, No Emoji) ====================
+# ==================== Complete Code (Python 3.6+ compatible) ====================
+# auth.py + db.py (SQLite) + bot.py (using urllib) + Data View (Admin only)
+
 import time
 import threading
 import math
@@ -8,21 +10,22 @@ import urllib.request
 import urllib.error
 import urllib.parse
 from collections import deque, Counter
+from typing import Optional, List, Dict, Any
 
 # ---------- Configuration ----------
 API_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json?ts={}"
-BOT_TOKEN = "7616902302:AAEp4VjUFX9mfBqYuc_ZY7pfuntVvQ8dpWE"   # Your bot token
+BOT_TOKEN = "7616902302:AAEp4VjUFX9mfBqYuc_ZY7pfuntVvQ8dpWE"   # Replace with your bot token
 TELEGRAM_API = "https://api.telegram.org/bot{}/".format(BOT_TOKEN)
 
-# Database file
-DB_FILE = "predictions.db"
-
-# ==================== Admin & Authorization ====================
-ADMIN_USER_ID = 5824157133  # Replace with your Telegram user ID
-
+# ==================== auth.py ====================
 AUTHORIZED_USER_IDS = {
-    5824157133,
+    5824157133,  # Replace with your Telegram IDs
     7237785856,
+}
+
+# Admin users who can view data
+ADMIN_USER_IDS = {
+    5824157133,   # Only this ID(s) can use SHOW DATA
 }
 
 def is_authorized(user_id):
@@ -31,93 +34,99 @@ def is_authorized(user_id):
     return user_id in AUTHORIZED_USER_IDS
 
 def is_admin(user_id):
-    if user_id is None:
-        return False
-    return user_id == ADMIN_USER_ID
+    return user_id in ADMIN_USER_IDS
 
-# ==================== Database (SQLite) ====================
+# ==================== db.py (SQLite - built-in) ====================
 def init_db():
-    """Create database and table if not exists"""
+    conn = sqlite3.connect('predictions.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS rounds
+                 (period TEXT PRIMARY KEY, number INTEGER, size TEXT,
+                  prediction TEXT, result TEXT, range_pred TEXT,
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
     try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS rounds
-                     (period TEXT PRIMARY KEY, 
-                      number INTEGER, 
-                      size TEXT,
-                      prediction TEXT, 
-                      result TEXT, 
-                      range_pred TEXT, 
-                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-        conn.commit()
-        conn.close()
-        print("Database created:", DB_FILE)
-        return True
-    except Exception as e:
-        print("Database error:", e)
-        return False
+        c.execute("ALTER TABLE rounds ADD COLUMN range_pred TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        c.execute("ALTER TABLE rounds ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+    except sqlite3.OperationalError:
+        pass
+    conn.commit()
+    conn.close()
 
 def save_round(period, number, size, prediction, result, range_pred):
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute('''INSERT OR REPLACE INTO rounds (period, number, size, prediction, result, range_pred, created_at)
-                     VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)''', 
-                     (period, number, size, prediction, result, range_pred))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        print("Save error:", e)
-        return False
+    conn = sqlite3.connect('predictions.db')
+    c = conn.cursor()
+    c.execute('''INSERT OR REPLACE INTO rounds (period, number, size, prediction, result, range_pred, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)''',
+              (period, number, size, prediction, result, range_pred))
+    conn.commit()
+    conn.close()
 
 def load_recent_history(limit=300):
+    conn = sqlite3.connect('predictions.db')
+    c = conn.cursor()
     try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
         c.execute('''SELECT period, number, size, prediction, result, range_pred FROM rounds
                      ORDER BY period DESC LIMIT ?''', (limit,))
         rows = c.fetchall()
-        conn.close()
-        return rows
-    except Exception as e:
-        print("Load error:", e)
-        return []
+    except sqlite3.OperationalError:
+        c.execute('''SELECT period, number, size, prediction, result FROM rounds
+                     ORDER BY period DESC LIMIT ?''', (limit,))
+        rows = [(r[0], r[1], r[2], r[3], r[4], None) for r in c.fetchall()]
+    conn.close()
+    return rows
+
+def get_first_and_last():
+    """Returns first 2 and last 2 records from the database."""
+    conn = sqlite3.connect('predictions.db')
+    c = conn.cursor()
+    # First two (earliest)
+    c.execute("SELECT period, number, size, prediction, result, range_pred FROM rounds ORDER BY period ASC LIMIT 2")
+    first_two = c.fetchall()
+    # Last two (most recent)
+    c.execute("SELECT period, number, size, prediction, result, range_pred FROM rounds ORDER BY period DESC LIMIT 2")
+    last_two_raw = c.fetchall()
+    conn.close()
+    # Reverse last_two so they appear in chronological order (older first)
+    last_two = list(reversed(last_two_raw))
+    return first_two, last_two
 
 def get_total_count():
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM rounds")
-        count = c.fetchone()[0]
-        conn.close()
-        return count
-    except Exception as e:
-        print("Count error:", e)
-        return 0
+    conn = sqlite3.connect('predictions.db')
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM rounds")
+    count = c.fetchone()[0]
+    conn.close()
+    return count
 
-# ==================== Utility functions ====================
+init_db()
+
+# ==================== Utility Functions (HTTP calls) ====================
 def http_get_json(url, timeout=10):
+    """GET request and return JSON."""
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=timeout) as response:
             data = response.read().decode('utf-8')
             return json.loads(data)
     except Exception as e:
-        print("HTTP GET error:", e)
+        print("HTTP GET Error:", e)
         return None
 
 def http_post_json(url, payload, timeout=10):
+    """POST JSON payload."""
     try:
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
         with urllib.request.urlopen(req, timeout=timeout) as response:
             return response.read().decode('utf-8')
     except Exception as e:
-        print("HTTP POST error:", e)
+        print("HTTP POST Error:", e)
         return None
 
-# ==================== UI Formatting (English, No Emoji) ====================
+# ==================== UI Formatting ====================
 def format_prediction_ui(pred_data, period):
     size = pred_data["size"]
     conf = pred_data["confidence"]
@@ -129,111 +138,93 @@ def format_prediction_ui(pred_data, period):
     cycle = pred_data.get("cycle", "STABLE")
     big_pct = pred_data.get("big_pct", 78)
     small_pct = pred_data.get("small_pct", 22)
-    
-    if conf >= 85:
-        signal = "HIGH"
-        volatility = "LOW"
-        risk = "LOW"
-    else:
-        signal = "MEDIUM"
-        volatility = "MEDIUM"
-        risk = "MEDIUM"
-    
-    size_text = "BIG" if size == "BIG" else "SMALL"
-    if conf >= 92:
-        level = "LEVEL 1"
-    elif conf >= 85:
-        level = "LEVEL 2"
-    else:
-        level = "LEVEL 3"
-    
-    big_bar = "#" * int(big_pct / 10) + "." * (10 - int(big_pct / 10))
-    small_bar = "#" * int(small_pct / 10) + "." * (10 - int(small_pct / 10))
-    
+    signal = "HIGH 🟢" if conf >= 85 else "MEDIUM 🟡"
+    volatility = "LOW" if conf >= 85 else "MEDIUM"
+    risk = "LOW" if conf >= 85 else "MEDIUM"
+
+    size_emoji = "🐘" if size == "BIG" else "🐭"
+    level = "🔥 LEVEL 1" if conf >= 92 else "⚡ LEVEL 2" if conf >= 85 else "⚠️ LEVEL 3"
+
+    big_bar = "█" * int(big_pct / 10) + "░" * (10 - int(big_pct / 10))
+    small_bar = "█" * int(small_pct / 10) + "░" * (10 - int(small_pct / 10))
+
     ui = """
-================================
-AI ANALYSIS
-================================
-MA            : {ma}
-RSI           : {rsi:.1f}
-STD DEV       : {std}
-PATTERN       : {pattern}
-CYCLE         : {cycle}
+━━━━━━━━━━━━━━━━━━━━━━
+🧠 AI ANALYSIS
+━━━━━━━━━━━━━━━━━━━━━━
+📈 MA           : {ma}
+📊 RSI          : {rsi:.1f}
+📉 STD DEV      : {std}
+🔄 PATTERN      : {pattern}
+🎯 CYCLE        : {cycle}
 
-================================
-AI VOTING
-================================
-BIG          {big_bar} {big_pct}%
-SMALL        {small_bar} {small_pct}%
+━━━━━━━━━━━━━━━━━━━━━━
+🗳️ AI VOTING
+━━━━━━━━━━━━━━━━━━━━━━
+🐘 BIG          {big_bar} {big_pct}%
+🐭 SMALL        {small_bar} {small_pct}%
 
-FINAL PREDICTION : {size_text}
+🏆 FINAL EDGE   : {size_emoji} {size}
 
-================================
-AI METRICS
-================================
-CONFIDENCE    : {conf}%
-SIGNAL        : {signal}
-VOLATILITY    : {volatility}
-RISK          : {risk}
+━━━━━━━━━━━━━━━━━━━━━━
+📡 AI METRICS
+━━━━━━━━━━━━━━━━━━━━━━
+🎯 CONFIDENCE   : {conf}%
+📶 SIGNAL       : {signal}
+🎲 VOLATILITY   : {volatility}
+⚖️ RISK         : {risk}
 
-================================
-PERIOD        : {period}
-RANGE         : {num_range}
-LEVEL         : {level}
-================================
-AI STATUS : ACTIVE
-ENGINE    : SUBHA AI
-MODE      : LIVE
-================================
+━━━━━━━━━━━━━━━━━━━━━━
+🆔 PERIOD       : {period}
+🎯 RANGE        : {num_range}
+📊 LEVEL        : {level}
+━━━━━━━━━━━━━━━━━━━━━━
+⚡ AI STATUS : ACTIVE
+🧠 ENGINE    : SUBHA AI
+🔥 MODE      : LIVE
+━━━━━━━━━━━━━━━━━━━━━━
 """.format(ma=ma_val, rsi=rsi_val, std=std_val, pattern=pattern, cycle=cycle,
            big_bar=big_bar, big_pct=big_pct, small_bar=small_bar, small_pct=small_pct,
-           size_text=size_text, conf=conf, signal=signal, volatility=volatility,
+           size_emoji=size_emoji, size=size, conf=conf, signal=signal, volatility=volatility,
            risk=risk, period=period, num_range=num_range, level=level)
     return ui
 
 def format_result_ui(period, number, actual_size, result, pred, range_pred):
-    status_text = "WIN" if result == "WIN" else "LOSS"
-    actual_text = "BIG" if actual_size == "BIG" else "SMALL"
+    if result == "WIN":
+        status_emoji, status_text, bg = "✅", "WIN 🎉", "🟢"
+    else:
+        status_emoji, status_text, bg = "❌", "LOSS 😞", "🔴"
+    actual_emoji = "🐘" if actual_size == "BIG" else "🐭"
     ui = """
-{status_text}
-================================
-RESULT
-================================
-PERIOD    : {period}
-PREDICT   : {pred}
-ACTUAL    : {actual_text} [{number}]
-RANGE     : {range_pred}
-================================
-""".format(status_text=status_text, period=period, pred=pred,
-           actual_text=actual_text, number=number, range_pred=range_pred)
+{status_emoji} {status_text}  {bg}
+━━━━━━━━━━━━━━━━━━━━━━
+📊 RESULT
+━━━━━━━━━━━━━━━━━━━━━━
+📅 PERIOD    : {period}
+🎯 PREDICT   : {pred}
+✅ ACTUAL    : {actual_emoji} {actual_size} [{number}]
+📊 RANGE     : {range_pred}
+━━━━━━━━━━━━━━━━━━━━━━
+""".format(status_emoji=status_emoji, status_text=status_text, bg=bg,
+           period=period, pred=pred, actual_emoji=actual_emoji,
+           actual_size=actual_size, number=number, range_pred=range_pred)
     return ui
 
-def format_data_first_last(first_two, last_two, total_count):
-    """Format first 2 and last 2 records (for show_data)"""
-    text = "Admin ID: `{}`\n\n".format(ADMIN_USER_ID)
-    text += "First 2 and Last 2 Records:\n"
-    text += "================================\n"
-    text += "`{:<14} {:<4} {:<7} {:<7} {:<6} {:<10}`\n".format("Period", "Num", "Size", "Pred", "Res", "Range")
+def format_first_last_ui(first_two, last_two):
+    """Format first 2 and last 2 records + admin IDs."""
+    text = "📋 *Database Records (First 2 & Last 2)*\n"
+    text += "━━━━━━━━━━━━━━━━━━━━━━\n"
+    text += "🔹 *First 2 entries:*\n"
     for row in first_two:
-        period_short = str(row[0])[-8:]
-        num = str(row[1]) if row[1] is not None else "-"
-        size = str(row[2]) if row[2] else "-"
-        pred = str(row[3]) if row[3] else "-"
-        res = str(row[4]) if row[4] else "-"
-        rng = str(row[5]) if row[5] else "-"
-        text += "`{:<14} {:<4} {:<7} {:<7} {:<6} {:<10}`\n".format(period_short, num, size, pred, res, rng)
-    if len(first_two) == 2 and len(last_two) >= 2:
-        text += "         ...\n"
+        period, num, size, pred, result, range_pred = row
+        text += f"📅 `{period}` | 🎯 {num} | 📊 {size} | 🧠 {pred} | 🏁 {result} | 🎚 {range_pred}\n"
+    text += "\n🔸 *Last 2 entries:*\n"
     for row in last_two:
-        period_short = str(row[0])[-8:]
-        num = str(row[1]) if row[1] is not None else "-"
-        size = str(row[2]) if row[2] else "-"
-        pred = str(row[3]) if row[3] else "-"
-        res = str(row[4]) if row[4] else "-"
-        rng = str(row[5]) if row[5] else "-"
-        text += "`{:<14} {:<4} {:<7} {:<7} {:<6} {:<10}`\n".format(period_short, num, size, pred, res, rng)
-    text += "================================\n"
-    text += "Total Records: {}".format(total_count)
+        period, num, size, pred, result, range_pred = row
+        text += f"📅 `{period}` | 🎯 {num} | 📊 {size} | 🧠 {pred} | 🏁 {result} | 🎚 {range_pred}\n"
+    text += "\n👑 *Admin User IDs:*\n"
+    text += ", ".join(str(uid) for uid in ADMIN_USER_IDS)
+    text += "\n━━━━━━━━━━━━━━━━━━━━━━"
     return text
 
 # ==================== Predictor Class ====================
@@ -250,11 +241,9 @@ class Predictor:
         self.load_from_db()
 
     def load_from_db(self):
-        rows = load_recent_history(300)
-        for _, num, _, _, _, _ in rows:
+        for _, num, _, _, _, _ in load_recent_history(300):
             if num is not None:
                 self.history.append(num)
-        print("History loaded:", len(self.history), "numbers")
 
     def update(self, num, period, prediction=None, result=None, range_pred=None):
         size = "BIG" if num >= 5 else "SMALL"
@@ -271,6 +260,7 @@ class Predictor:
             pass
         return []
 
+    # ---------- Indicators ----------
     def ma(self, data, w):
         if len(data) >= w:
             return sum(data[-w:]) / w
@@ -300,15 +290,22 @@ class Predictor:
         mean = sum(recent) / w
         return math.sqrt(sum((x - mean) ** 2 for x in recent) / w)
 
+    # ---------- Prediction ----------
     def predict_size(self):
         hist = list(self.history)
         if len(hist) < 20:
-            return "BIG", 60, "5 - 9", "BULLISH", 50, "LOW", "NEUTRAL", "STABLE", 50, 50
+            return "BIG", 60, "5 • 9", "BULLISH", 50, "LOW", "NEUTRAL", "STABLE", 50, 50
 
         last = hist[-1]
         last_size = "BIG" if last >= 5 else "SMALL"
 
-        specials = {0: ("BIG", 99, "0 - 2"), 4: ("BIG", 99, "3 - 5"), 5: ("SMALL", 99, "5 - 7"), 9: ("SMALL", 99, "7 - 9")}
+        # Fixed special numbers (0-4 = SMALL, 5-9 = BIG)
+        specials = {
+            0: ("SMALL", 99, "0 • 2"),
+            4: ("SMALL", 99, "3 • 5"),
+            5: ("BIG", 99, "5 • 7"),
+            9: ("SMALL", 99, "7 • 9")
+        }
         if last in specials:
             s = specials[last]
             return s[0], s[1], s[2], "BULLISH", 70, "LOW", "SPECIAL", "STABLE", 90, 10
@@ -320,58 +317,6 @@ class Predictor:
             else:
                 break
 
-        if streak >= 5:
-            pred = last_size
-            conf = 99
-            recent = hist[-20:]
-            nums = [x for x in recent if (x >= 5) == (pred == "BIG")]
-            if len(nums) >= 2:
-                cnt = Counter(nums)
-                top = cnt.most_common(2)
-                rng = str(top[0][0]) + " - " + str(top[1][0])
-            else:
-                rng = "5 - 9" if pred == "BIG" else "0 - 4"
-            return pred, conf, rng, "STRONG BULLISH", 72, "LOW", "DRAGON", "STABLE", 95, 5
-
-        if streak == 4:
-            pred = last_size
-            conf = 97
-            recent = hist[-20:]
-            nums = [x for x in recent if (x >= 5) == (pred == "BIG")]
-            if len(nums) >= 2:
-                cnt = Counter(nums)
-                top = cnt.most_common(2)
-                rng = str(top[0][0]) + " - " + str(top[1][0])
-            else:
-                rng = "5 - 9" if pred == "BIG" else "0 - 4"
-            return pred, conf, rng, "BULLISH", 68, "LOW", "4-STREAK", "STABLE", 90, 10
-
-        if streak == 3:
-            pred = "SMALL" if last_size == "BIG" else "BIG"
-            conf = 90
-            recent = hist[-20:]
-            nums = [x for x in recent if (x >= 5) == (pred == "BIG")]
-            if len(nums) >= 2:
-                cnt = Counter(nums)
-                top = cnt.most_common(2)
-                rng = str(top[0][0]) + " - " + str(top[1][0])
-            else:
-                rng = "5 - 9" if pred == "BIG" else "0 - 4"
-            return pred, conf, rng, "BEARISH", 55, "MEDIUM", "3-STREAK BREAK", "UNSTABLE", 75, 25
-
-        if streak == 2:
-            pred = "SMALL" if last_size == "BIG" else "BIG"
-            conf = 85
-            recent = hist[-20:]
-            nums = [x for x in recent if (x >= 5) == (pred == "BIG")]
-            if len(nums) >= 2:
-                cnt = Counter(nums)
-                top = cnt.most_common(2)
-                rng = str(top[0][0]) + " - " + str(top[1][0])
-            else:
-                rng = "5 - 9" if pred == "BIG" else "0 - 4"
-            return pred, conf, rng, "NEUTRAL", 52, "MEDIUM", "2-STREAK BREAK", "STABLE", 70, 30
-
         def is_alt(l):
             if len(hist) < l:
                 return False
@@ -380,74 +325,73 @@ class Predictor:
                     return False
             return True
 
-        if is_alt(8):
-            pred = "SMALL" if last_size == "BIG" else "BIG"
-            conf = 92
+        # Helper to get top 2 numbers for range
+        def get_range(pred_type):
             recent = hist[-20:]
-            nums = [x for x in recent if (x >= 5) == (pred == "BIG")]
+            nums = [x for x in recent if (x >= 5) == (pred_type == "BIG")]
             if len(nums) >= 2:
                 cnt = Counter(nums)
                 top = cnt.most_common(2)
-                rng = str(top[0][0]) + " - " + str(top[1][0])
-            else:
-                rng = "5 - 9" if pred == "BIG" else "0 - 4"
+                return str(top[0][0]) + " • " + str(top[1][0])
+            return "5 • 9" if pred_type == "BIG" else "0 • 4"
+
+        if streak >= 5:
+            pred = last_size
+            conf = 99
+            rng = get_range(pred)
+            return pred, conf, rng, "STRONG BULLISH", 72, "LOW", "DRAGON", "STABLE", 95, 5
+
+        if streak == 4:
+            pred = last_size
+            conf = 97
+            rng = get_range(pred)
+            return pred, conf, rng, "BULLISH", 68, "LOW", "4-STREAK", "STABLE", 90, 10
+
+        if streak == 3:
+            pred = "SMALL" if last_size == "BIG" else "BIG"
+            conf = 90
+            rng = get_range(pred)
+            return pred, conf, rng, "BEARISH", 55, "MEDIUM", "3-STREAK BREAK", "UNSTABLE", 75, 25
+
+        if streak == 2:
+            pred = "SMALL" if last_size == "BIG" else "BIG"
+            conf = 85
+            rng = get_range(pred)
+            return pred, conf, rng, "NEUTRAL", 52, "MEDIUM", "2-STREAK BREAK", "STABLE", 70, 30
+
+        if is_alt(8):
+            pred = "SMALL" if last_size == "BIG" else "BIG"
+            conf = 92
+            rng = get_range(pred)
             return pred, conf, rng, "BULLISH", 65, "LOW", "ALTERNATING 8", "STABLE", 85, 15
 
         if is_alt(6):
             pred = "SMALL" if last_size == "BIG" else "BIG"
             conf = 88
-            recent = hist[-20:]
-            nums = [x for x in recent if (x >= 5) == (pred == "BIG")]
-            if len(nums) >= 2:
-                cnt = Counter(nums)
-                top = cnt.most_common(2)
-                rng = str(top[0][0]) + " - " + str(top[1][0])
-            else:
-                rng = "5 - 9" if pred == "BIG" else "0 - 4"
+            rng = get_range(pred)
             return pred, conf, rng, "BULLISH", 60, "LOW", "ALTERNATING 6", "STABLE", 80, 20
 
         if is_alt(5):
             pred = last_size
             conf = 85
-            recent = hist[-20:]
-            nums = [x for x in recent if (x >= 5) == (pred == "BIG")]
-            if len(nums) >= 2:
-                cnt = Counter(nums)
-                top = cnt.most_common(2)
-                rng = str(top[0][0]) + " - " + str(top[1][0])
-            else:
-                rng = "5 - 9" if pred == "BIG" else "0 - 4"
+            rng = get_range(pred)
             return pred, conf, rng, "NEUTRAL", 55, "MEDIUM", "TRAP", "STABLE", 72, 28
 
+        # Default analysis using moving averages and RSI
         ma5 = self.ma(hist, 5)
         ma10 = self.ma(hist, 10)
         ma20 = self.ma(hist, 20)
-        if ma5 > ma10 and ma10 > ma20:
-            ma_trend = "BULLISH"
-        elif ma5 < ma10 and ma10 < ma20:
-            ma_trend = "BEARISH"
-        else:
-            ma_trend = "NEUTRAL"
+        ma_trend = "BULLISH" if ma5 > ma10 and ma10 > ma20 else "BEARISH" if ma5 < ma10 and ma10 < ma20 else "NEUTRAL"
 
         rsi_val = self.rsi(hist, 14)
-        if rsi_val < 30:
-            rsi_trend = "BULLISH"
-        elif rsi_val > 70:
-            rsi_trend = "BEARISH"
-        else:
-            rsi_trend = "NEUTRAL"
+        rsi_trend = "BULLISH" if rsi_val < 30 else "BEARISH" if rsi_val > 70 else "NEUTRAL"
 
         recent_30 = hist[-30:] if len(hist) >= 30 else hist
         big_c = sum(1 for x in recent_30 if x >= 5)
         small_c = len(recent_30) - big_c
 
         std = self.std_dev(hist, 20)
-        if std < 1.5:
-            std_text = "LOW"
-        elif std < 2.5:
-            std_text = "MEDIUM"
-        else:
-            std_text = "HIGH"
+        std_text = "LOW" if std < 1.5 else "MEDIUM" if std < 2.5 else "HIGH"
 
         votes = {"BIG": 0, "SMALL": 0}
         votes["SMALL" if last_size == "BIG" else "BIG"] += 1
@@ -483,17 +427,7 @@ class Predictor:
         pattern_text = "ALTERNATING" if is_alt(4) else "RANDOM"
         cycle_text = "STABLE" if std < 1.5 else "UNSTABLE"
 
-        recent = hist[-20:] if len(hist) >= 20 else hist
-        if pred == "BIG":
-            nums = [x for x in recent if x >= 5]
-        else:
-            nums = [x for x in recent if x < 5]
-        if len(nums) >= 2:
-            cnt = Counter(nums)
-            top = cnt.most_common(2)
-            rng = str(top[0][0]) + " - " + str(top[1][0])
-        else:
-            rng = "5 - 9" if pred == "BIG" else "0 - 4"
+        rng = get_range(pred)
 
         return pred, conf, rng, ma_trend, rsi_val, std_text, pattern_text, cycle_text, big_pct, small_pct
 
@@ -523,32 +457,29 @@ class Predictor:
             self.streak = 0
         self.total_predictions += 1
 
-    def send_message(self, text, chat_id=None):
-        target_chat = chat_id if chat_id is not None else self.chat_id
-        if target_chat:
+    def send_message(self, text):
+        if self.chat_id:
             try:
                 url = TELEGRAM_API + "sendMessage"
-                payload = {"chat_id": target_chat, "text": text, "parse_mode": "Markdown"}
+                payload = {"chat_id": self.chat_id, "text": text, "parse_mode": "Markdown"}
                 http_post_json(url, payload, timeout=10)
             except:
                 pass
 
     def start(self, chat_id):
         if self.running:
-            self.send_message("Already running...", chat_id=chat_id)
             return
         self.running = True
         self.chat_id = chat_id
-        self.send_message("Prediction started! (Only confidence >= 85%)", chat_id=chat_id)
+        self.send_message("✅ Prediction started! (LEVEL 1-2: >=85%)")
         threading.Thread(target=self._loop, daemon=True).start()
 
-    def stop(self, chat_id=None):
+    def stop(self):
         self.running = False
-        self.send_message("Stopped.", chat_id=chat_id)
+        self.send_message("⏹ Stopped.")
 
     def _loop(self):
         seen = set()
-        predictions_sent = set()
         current_prediction = None
 
         while self.running:
@@ -577,7 +508,7 @@ class Predictor:
 
                     next_period = str(int(period) + 1)
                     pred_data = self.get_next_prediction()
-                    
+
                     if pred_data["confidence"] >= 85:
                         current_prediction = {
                             "period": next_period,
@@ -585,19 +516,18 @@ class Predictor:
                             "range": pred_data["range"]
                         }
                         self.send_message(format_prediction_ui(pred_data, next_period))
-                        predictions_sent.add(next_period)
 
                 if current_prediction and current_prediction["period"] == period and number is not None:
                     actual_size = "BIG" if number >= 5 else "SMALL"
                     won = (actual_size == current_prediction["size"])
                     res = "WIN" if won else "LOSS"
                     self.update_result(won)
-                    self.update(number, period, 
-                               prediction=current_prediction["size"], 
-                               result=res, 
+                    self.update(number, period,
+                               prediction=current_prediction["size"],
+                               result=res,
                                range_pred=current_prediction["range"])
-                    self.send_message(format_result_ui(period, number, actual_size, res, 
-                                                       current_prediction["size"], 
+                    self.send_message(format_result_ui(period, number, actual_size, res,
+                                                       current_prediction["size"],
                                                        current_prediction["range"]))
                     current_prediction = None
 
@@ -627,11 +557,10 @@ def get_updates(offset=None):
 
 def main():
     global last_update_id
-    print("=" * 50)
-    print("Bot starting... (SQLite, English)")
-    print("Database file:", DB_FILE)
-    print("Admin ID:", ADMIN_USER_ID)
-    print("=" * 50)
+    print("Bot started... (Pure Standard Library + Admin Data View)")
+    print("LEVEL 1 (>=92%) | LEVEL 2 (>=85%)")
+    print("Database: predictions.db (SQLite)")
+    print("Authorization active. Admin can view data.")
 
     while True:
         try:
@@ -644,74 +573,55 @@ def main():
                     user_id = msg["from"]["id"]
                     text = msg.get("text", "")
 
-                    print("User:", user_id, "Chat:", chat_id, "Text:", text)
-
+                    # Authorization check
                     if not is_authorized(user_id):
                         http_post_json(TELEGRAM_API + "sendMessage", {
                             "chat_id": chat_id,
-                            "text": "You are not authorized.",
+                            "text": "⛔ *You are not authorized!* Contact admin.",
                             "parse_mode": "Markdown"
                         }, timeout=10)
                         continue
 
+                    # /start command
                     if text == "/start":
-                        keyboard = {
-                            "inline_keyboard": [
-                                [{"text": "START", "callback_data": "start"}],
-                                [{"text": "STOP", "callback_data": "stop"}],
-                                [{"text": "STATUS", "callback_data": "status"}],
-                            ]
-                        }
+                        keyboard_buttons = [
+                            [{"text": "▶️ START", "callback_data": "start"}],
+                            [{"text": "⏹ STOP", "callback_data": "stop"}],
+                            [{"text": "📊 STATUS", "callback_data": "status"}],
+                        ]
+                        # Only admin sees SHOW DATA button
                         if is_admin(user_id):
-                            keyboard["inline_keyboard"].append([{"text": "SHOW DATA", "callback_data": "show_data"}])
-                        
-                        keyboard["inline_keyboard"].append([{"text": "CONTACT", "url": "https://t.me/your_username"}])
-                        
-                        start_text = "SUBHA AI v4.0 (SQLite)\n\n"
-                        start_text += "Provides prediction for each period.\n"
-                        start_text += "All data is stored in SQLite database.\n"
-                        start_text += "Your ID: `{}`\n".format(user_id)
-                        if is_admin(user_id):
-                            start_text += "You are admin.\n"
-                            start_text += "/show_data - View first 2 and last 2 records.\n"
-                        else:
-                            start_text += "Only admin can view data.\n"
-                        
+                            keyboard_buttons.append([{"text": "📊 SHOW DATA", "callback_data": "show_data"}])
+
+                        keyboard_buttons.append([{"text": "📞 CONTACT", "url": "https://t.me/your_username"}])
+
+                        keyboard = {"inline_keyboard": keyboard_buttons}
                         http_post_json(TELEGRAM_API + "sendMessage", {
                             "chat_id": chat_id,
-                            "text": start_text,
+                            "text": "🤖 *SUBHA v3.0 (Pure Python)*\n\n✅ Predictions every period\n✅ LEVEL 1 (>=92%) | LEVEL 2 (>=85%)\n✅ Data stored in SQLite\n✅ Admin can view first & last 2 records\n\nUse buttons below.",
                             "reply_markup": keyboard,
                             "parse_mode": "Markdown"
                         }, timeout=10)
 
+                    # /show_data command (admin only)
                     elif text == "/show_data":
                         if not is_admin(user_id):
                             http_post_json(TELEGRAM_API + "sendMessage", {
                                 "chat_id": chat_id,
-                                "text": "Access denied. Admin only.",
+                                "text": "⛔ *This feature is for admins only!*",
                                 "parse_mode": "Markdown"
                             }, timeout=10)
                             continue
-                        try:
-                            conn = sqlite3.connect(DB_FILE)
-                            c = conn.cursor()
-                            c.execute("SELECT period, number, size, prediction, result, range_pred FROM rounds ORDER BY period ASC LIMIT 2")
-                            first_two = c.fetchall()
-                            c.execute("SELECT period, number, size, prediction, result, range_pred FROM rounds ORDER BY period DESC LIMIT 2")
-                            last_two = c.fetchall()
-                            conn.close()
-                            last_two_sorted = sorted(last_two, key=lambda x: x[0])
-                            response = format_data_first_last(first_two, last_two_sorted, get_total_count())
-                            http_post_json(TELEGRAM_API + "sendMessage", {
-                                "chat_id": chat_id,
-                                "text": response,
-                                "parse_mode": "Markdown"
-                            }, timeout=10)
-                        except Exception as e:
-                            http_post_json(TELEGRAM_API + "sendMessage", {
-                                "chat_id": chat_id,
-                                "text": "Error fetching data: {}".format(str(e))
-                            }, timeout=10)
+                        first_two, last_two = get_first_and_last()
+                        if not first_two and not last_two:
+                            response = "⚠️ No data collected yet."
+                        else:
+                            response = format_first_last_ui(first_two, last_two)
+                        http_post_json(TELEGRAM_API + "sendMessage", {
+                            "chat_id": chat_id,
+                            "text": response,
+                            "parse_mode": "Markdown"
+                        }, timeout=10)
 
                 cb = update.get("callback_query")
                 if cb:
@@ -719,61 +629,45 @@ def main():
                     user_id = cb["from"]["id"]
                     data = cb["data"]
                     cb_id = cb["id"]
-                    
-                    print("Callback - User:", user_id, "Chat:", chat_id, "Data:", data)
-
-                    if not is_authorized(user_id):
-                        # Send a toast alert to the user
-                        http_post_json(TELEGRAM_API + "answerCallbackQuery", {
-                            "callback_query_id": cb_id,
-                            "text": "You are not authorized!",
-                            "show_alert": True
-                        }, timeout=5)
-                        continue
-
-                    # Answer callback to remove loading state
                     http_post_json(TELEGRAM_API + "answerCallbackQuery", {"callback_query_id": cb_id}, timeout=5)
 
+                    if not is_authorized(user_id):
+                        http_post_json(TELEGRAM_API + "sendMessage", {
+                            "chat_id": chat_id,
+                            "text": "⛔ You are not authorized.",
+                        }, timeout=10)
+                        continue
+
                     if data == "start":
-                        predictor.start(chat_id)
+                        if not predictor.running:
+                            predictor.start(chat_id)
+                        else:
+                            predictor.send_message("⏳ Already running...")
                     elif data == "stop":
-                        predictor.stop(chat_id)
+                        predictor.stop()
                     elif data == "status":
-                        stats = "STATISTICS\n"
-                        stats += "Wins: {}\n".format(predictor.wins)
-                        stats += "Losses: {}\n".format(predictor.losses)
-                        stats += "Current Streak: {}\n".format(predictor.streak)
-                        stats += "Best Streak: {}\n".format(predictor.best_streak)
-                        stats += "Total Predictions: {}".format(predictor.total_predictions)
-                        predictor.send_message(stats, chat_id=chat_id)
+                        stats = "📊 *Statistics*\n✅ Wins: {wins}\n❌ Losses: {losses}\n🔥 Streak: {streak}\n🏆 Best Streak: {best}\n📈 Total: {total}".format(
+                            wins=predictor.wins, losses=predictor.losses, streak=predictor.streak,
+                            best=predictor.best_streak, total=predictor.total_predictions)
+                        predictor.send_message(stats)
                     elif data == "show_data":
                         if not is_admin(user_id):
                             http_post_json(TELEGRAM_API + "sendMessage", {
                                 "chat_id": chat_id,
-                                "text": "Access denied. Admin only.",
+                                "text": "⛔ *This feature is for admins only!*",
                                 "parse_mode": "Markdown"
                             }, timeout=10)
                             continue
-                        try:
-                            conn = sqlite3.connect(DB_FILE)
-                            c = conn.cursor()
-                            c.execute("SELECT period, number, size, prediction, result, range_pred FROM rounds ORDER BY period ASC LIMIT 2")
-                            first_two = c.fetchall()
-                            c.execute("SELECT period, number, size, prediction, result, range_pred FROM rounds ORDER BY period DESC LIMIT 2")
-                            last_two = c.fetchall()
-                            conn.close()
-                            last_two_sorted = sorted(last_two, key=lambda x: x[0])
-                            response = format_data_first_last(first_two, last_two_sorted, get_total_count())
-                            http_post_json(TELEGRAM_API + "sendMessage", {
-                                "chat_id": chat_id,
-                                "text": response,
-                                "parse_mode": "Markdown"
-                            }, timeout=10)
-                        except Exception as e:
-                            http_post_json(TELEGRAM_API + "sendMessage", {
-                                "chat_id": chat_id,
-                                "text": "Error fetching data: {}".format(str(e))
-                            }, timeout=10)
+                        first_two, last_two = get_first_and_last()
+                        if not first_two and not last_two:
+                            response = "⚠️ No data collected yet."
+                        else:
+                            response = format_first_last_ui(first_two, last_two)
+                        http_post_json(TELEGRAM_API + "sendMessage", {
+                            "chat_id": chat_id,
+                            "text": response,
+                            "parse_mode": "Markdown"
+                        }, timeout=10)
 
             time.sleep(1)
         except Exception as e:
@@ -781,5 +675,4 @@ def main():
             time.sleep(5)
 
 if __name__ == "__main__":
-    init_db()
     main()
